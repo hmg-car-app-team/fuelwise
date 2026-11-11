@@ -1,5 +1,6 @@
 package com.hmgcarapp.fuelwise.ui
 
+import com.hmgcarapp.fuelwise.vehicle.SignalStatusText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -449,9 +450,9 @@ private fun SettingsDetail(c: AppController, s: UiState) {
 private fun SimPanel(c: AppController, s: UiState) {
     val e = s.energy
     PleosPanel(Modifier.fillMaxWidth(), title = "차량 신호 상태 (SDK 실측)") {
-        KV("연료 %", e.fuelPercent?.toString() ?: "없음: ${e.fuelError ?: "대기"}")
-        KV("배터리 SoC %", e.evSocPercent?.toString() ?: "없음: ${e.evError ?: "대기"}")
-        KV("주행가능거리", e.rangeKm?.let { String.format(Locale.KOREA, "%.0f km", it) } ?: "없음: ${e.rangeError ?: "대기"}")
+        KV("연료 %", e.fuelPercent?.toString() ?: SignalStatusText.missing(e.fuelError, c.debuggable))
+        KV("배터리 SoC %", e.evSocPercent?.toString() ?: SignalStatusText.missing(e.evError, c.debuggable))
+        KV("주행가능거리", e.rangeKm?.let { String.format(Locale.KOREA, "%.0f km", it) } ?: SignalStatusText.missing(e.rangeError, c.debuggable))
         KV("현재 위치", if (s.originReal) "신호/시뮬 위치" else "기본(강남 샘플 37.505,127.0499)")
     }
     PleosPanel(Modifier.fillMaxWidth(), title = "시연: 잔량 시뮬레이션") {
