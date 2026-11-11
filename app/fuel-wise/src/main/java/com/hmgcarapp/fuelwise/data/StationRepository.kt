@@ -21,6 +21,28 @@ import java.net.URL
 interface StationRepository {
     /** origin 주변 후보(주유소+충전소). 실패 시 예외. */
     suspend fun candidates(origin: LatLon): List<Candidate>
+
+    /** 마지막 로드의 충전소 실데이터 스냅샷 출처 정보. 가공 샘플 충전소를 썼으면 null. */
+    val evMeta: EvMeta? get() = null
+}
+
+/** 충전소 공공데이터 스냅샷의 표기용 메타(_meta). 파서가 읽어 보존한다. */
+data class EvMeta(val source: String, val license: String, val collectedAt: String, val assumedWon: Int)
+
+/** 데이터 표기 문구(화면·정보 영역 공용). 실시간·과장 표현을 쓰지 않는다. */
+object DataLabels {
+    const val FUEL_LABEL = "유가: 가공 샘플"
+    const val ATTRIBUTION = "충전소 정보: 한국환경공단 『전기자동차 충전소 정보』(공공데이터포털 data.go.kr, 공공누리 제1유형). 가공·편집됨, 실시간 정보 아님. 유가는 가공 샘플이며 오피넷 등 실제 유가 데이터가 아님."
+    fun evSnapshot(m: EvMeta) = "충전소: 공공데이터 스냅샷(한국환경공단 · 공공누리 제1유형 · 기준일 ${m.collectedAt}) · 요금은 가정 단가(원본에 가격 정보 없음) · 실시간 사용 가능 여부 아님"
+    /** 전체 라벨. 충전소가 실데이터면 충전소/유가를 분리해, 아니면 기존 '가공 샘플'. */
+    fun full(m: EvMeta?) = if (m == null) StationRepositories.DATA_LABEL else evSnapshot(m) + " · " + FUEL_LABEL
+    /** 헤더용 짧은 라벨. */
+    fun short(m: EvMeta?) = if (m == null) StationRepositories.DATA_LABEL else "충전소: 공공데이터 스냅샷 · $FUEL_LABEL"
+    fun assumedUnit(m: EvMeta?, won: Int? = null) = "가정 단가 ${won ?: m?.assumedWon ?: DEFAULT_ASSUMED_WON}원/kWh"
+    const val DEFAULT_ASSUMED_WON = 320
+    /** 가정 단가 후보(요금 비교 불가)에 붙이는 고정 문구. */
+    const val ASSUMED_NO_COMPARE = "가정 단가라 요금 비교는 할 수 없어요 · 우회/대기 기준 추천"
+    const val ASSUMED_REPORT_NOTE = "충전 금액은 가정 단가 기준(실제 요금 아님)"
 }
 
 /**
@@ -32,6 +54,9 @@ object SampleJsonParser {
     const val MAX_EV_WON = 2000
     const val MAX_KW = 1000.0
     const val MAX_WAIT_MIN = 600
+    /** 급속 판정 기준(kW). 원본의 speed 라벨이 아니라 kW 로 판정한다. */
+    const val FAST_KW = 50.0
+    fun isFast(c: Candidate) = (c.chargerKw ?: 0.0) >= FAST_KW
 
     private fun pos(o: JSONObject): LatLon? {
         val lat = o.getDouble("lat"); val lon = o.getDouble("lon")
@@ -49,18 +74,28 @@ object SampleJsonParser {
         return Candidate(id = o.getString("id"), name = o.getString("name"), brand = o.optString("brand"), kind = EnergyKind.FUEL, pos = p, fuelPrices = prices)
     }
 
-    private fun parseEv(o: JSONObject): Candidate? {
+    private fun parseEv(o: JSONObject, defaultAssumed: Boolean): Candidate? {
         val p = pos(o) ?: return null
         val won = o.getInt("won"); val kw = o.getDouble("kw")
         if (won !in 1..MAX_EV_WON || !kw.isFinite() || kw <= 0.0 || kw > MAX_KW) return null
         return Candidate(
             id = o.getString("id"), name = o.getString("name"), brand = o.optString("brand"), kind = EnergyKind.EV, pos = p,
             pricePerKwh = won, chargerKw = kw, waitMin = o.optInt("wait", 0).coerceIn(0, MAX_WAIT_MIN),
+            priceAssumed = o.optJSONObject("x")?.optBoolean("priceAssumed", defaultAssumed) ?: defaultAssumed,
         )
     }
 
-    fun parse(json: String): List<Candidate> {
+    /** _meta(출처·이용허락·수집일·가정 단가). 없거나 불완전하면 null. assumedWon 이 1..상한 밖(0·음수·누락)이면 기본 320원으로 둔다(출처 표기는 유효하므로 meta 를 거부하지 않는다). */
+    fun parseMeta(json: String): EvMeta? = runCatching {
+        val m = JSONObject(json).optJSONObject("_meta") ?: return null
+        val src = m.optString("source"); val lic = m.optString("license"); val at = m.optString("collectedAt")
+        if (src.isBlank() || lic.isBlank() || at.isBlank()) null else EvMeta(src, lic, at, m.optInt("assumedWon", 0).takeIf { it in 1..MAX_EV_WON } ?: DataLabels.DEFAULT_ASSUMED_WON)
+    }.getOrNull()
+
+    /** 충전소 행에 x.priceAssumed 가 없을 때의 값: `_meta` 가 있는 스냅샷은 true(행이 명시적 false 일 때만 실제 요금), `_meta` 없는 가공 샘플은 false. */
+    fun parse(json: String, includeFuel: Boolean = true, includeEv: Boolean = true): List<Candidate> {
         val root = JSONObject(json)
+        val evAssumedDefault = root.optJSONObject("_meta") != null
         val out = mutableListOf<Candidate>()
         fun each(key: String, f: (JSONObject) -> Candidate?) {
             val a = root.optJSONArray(key) ?: return
@@ -69,16 +104,40 @@ object SampleJsonParser {
                 if (c == null) HmgLog.w("Sample", "$key[$i] 건너뜀(형식/범위 오류)") else if (out.none { it.id == c.id }) out += c
             }
         }
-        each("fuel", ::parseFuel)
-        each("ev", ::parseEv)
+        if (includeFuel) each("fuel", ::parseFuel)
+        if (includeEv) each("ev") { parseEv(it, evAssumedDefault) }
         return out
     }
 }
 
-/** 번들 가공 샘플. 네트워크 없음. */
+/** 번들 데이터 합성(순수). 주유소는 가공 샘플, 충전소는 공공데이터 스냅샷. 스냅샷이 없거나 깨졌거나 0건이면 샘플 충전소로 폴백. */
+object StationData {
+    data class Merged(val candidates: List<Candidate>, val evMeta: EvMeta?)
+
+    fun merge(sampleJson: String, evSnapshotJson: String?): Merged {
+        val sample = SampleJsonParser.parse(sampleJson)
+        val ev = evSnapshotJson?.let { j -> runCatching { SampleJsonParser.parse(j, includeFuel = false) }.getOrNull() }.orEmpty()
+        val meta = evSnapshotJson?.let(SampleJsonParser::parseMeta)
+        if (ev.isEmpty() || meta == null) return Merged(sample, null)
+        val fuel = sample.filter { it.kind == EnergyKind.FUEL }
+        return Merged(fuel + ev.filter { e -> fuel.none { it.id == e.id } }, meta)
+    }
+}
+
+/** 번들 데이터. 네트워크 없음. 최초 1회만 읽어 파싱하고(IO 스레드) 결과를 재사용한다. */
 class FakeStationRepository(private val context: Context) : StationRepository {
+    @Volatile private var cached: StationData.Merged? = null
+    override val evMeta: EvMeta? get() = cached?.evMeta
+
     override suspend fun candidates(origin: LatLon): List<Candidate> = withContext(Dispatchers.IO) {
-        SampleJsonParser.parse(context.assets.open("stations_sample.json").bufferedReader(Charsets.UTF_8).use { it.readText() })
+        (cached ?: load().also { cached = it }).candidates
+    }
+
+    private fun load(): StationData.Merged {
+        fun read(name: String) = context.assets.open(name).bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val sample = read("stations_sample.json")
+        val ev = try { read("ev_stations.json") } catch (e: Exception) { HmgLog.w("StationRepo", "충전소 스냅샷 읽기 실패 -> 샘플 충전소: ${e.javaClass.simpleName}"); null }
+        return StationData.merge(sample, ev)
     }
 }
 
@@ -101,6 +160,7 @@ class RemoteStationRepository(private val apiKey: String, private val baseUrl: S
 class FallbackStationRepository(private val primary: StationRepository, private val fallback: StationRepository) : StationRepository {
     var lastFallbackReason: String? = null
         private set
+    override val evMeta: EvMeta? get() = if (lastFallbackReason == null) primary.evMeta else fallback.evMeta
 
     override suspend fun candidates(origin: LatLon): List<Candidate> = try {
         primary.candidates(origin).also { lastFallbackReason = null }

@@ -99,9 +99,10 @@ object StoreRules {
      * '완료 기록' 성공 토스트(r8R1-3). 저장이 보류 중([saveHeld])이면 기록은 이번 실행의 메모리에만 있으므로 그렇게 밝힌다.
      * 보류가 아니면 기존 문구 그대로.
      */
-    fun recordedMessage(name: String, netSaving: Long, saveHeld: Boolean): String {
+    fun recordedMessage(name: String, netSaving: Long, saveHeld: Boolean, assumed: Boolean = false): String {
         val saving = String.format(java.util.Locale.KOREA, "%,d", netSaving)
-        return if (saveHeld) "기록됨(이번 실행에서만 유지): $name (추정 절약 ${saving}원)" else "기록됨: $name (추정 절약 ${saving}원)"
+        val detail = if (assumed) "가정 단가 기준·실제 요금 아님" else "추정 절약 ${saving}원"
+        return if (saveHeld) "기록됨(이번 실행에서만 유지): $name ($detail)" else "기록됨: $name ($detail)"
     }
 
     /** 삭제 실패 뒤 메모리 목록 복원(r7R4-1): 삭제 전 목록 + 그 사이 새로 생긴 항목. 저장 전체 상한은 호출부의 capReport 가 건다. */

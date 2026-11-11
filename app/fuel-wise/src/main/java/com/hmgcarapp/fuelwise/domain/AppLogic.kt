@@ -88,7 +88,10 @@ object AlertText {
         val km = String.format(Locale.KOREA, "%.1f", best.detourKm)
         val lead = if (Josa.isNeutral(name)) "추천 후보는 $name." else null
         fun sentence(pred: String) = if (lead != null) "$lead $pred" else "${Josa.subject(name)} $pred"
+        val assumed = best.candidate.priceAssumed
         val basis = when {
+            assumed && best.isBaseline -> sentence("우회가 가장 적어 추천해요(대략 ${km}km). 요금은 가정 단가예요.")
+            assumed -> sentence("우회·대기 기준으로 추천해요(우회 대략 ${km}km). 요금은 가정 단가예요.")
             best.isBaseline -> sentence("우회가 가장 적어 추천해요(대략 ${km}km).")
             best.netSaving > 0 -> sentence("대략 ${km}km 돌아가도 실질 ${String.format(Locale.KOREA, "%,d", best.netSaving)}원 절약돼요.")
             else -> sentence("실질 비용이 가장 낮아요(우회 대략 ${km}km).")
@@ -102,7 +105,7 @@ object AlertText {
      */
     fun line(reason: String, best: Quote?): String {
         if (best == null) return shorten("$reason · 근처 후보를 찾지 못했어요")
-        val tail = if (!best.isBaseline && best.netSaving > 0) " · 약 ${String.format(Locale.KOREA, "%,d", best.netSaving)}원 절약" else ""
+        val tail = if (best.candidate.priceAssumed) " · 가정 단가" else if (!best.isBaseline && best.netSaving > 0) " · 약 ${String.format(Locale.KOREA, "%,d", best.netSaving)}원 절약" else ""
         val head = "$reason · "
         val room = (BANNER_MAX - head.length - tail.length).coerceAtLeast(4)
         return shorten(head + shorten(best.candidate.name, room) + tail)
@@ -142,7 +145,11 @@ object ReportLogic {
 
     /** 합계에는 샘플 항목을 넣지 않는다. */
     fun monthSaved(items: List<ReportItem>, key: String, tz: TimeZone = TimeZone.getDefault()) =
-        items.filter { !it.sample && monthKey(it.ts, tz) == key }.sumOf { it.saved }
+        items.filter { !it.sample && !it.assumed && monthKey(it.ts, tz) == key }.sumOf { it.saved }
+
+    /** 가정 단가로 기록된 항목 수(절약 합계에서 제외됨). */
+    fun monthAssumedCount(items: List<ReportItem>, key: String, tz: TimeZone = TimeZone.getDefault()) =
+        items.count { !it.sample && it.assumed && monthKey(it.ts, tz) == key }
 
     fun monthSpent(items: List<ReportItem>, key: String, tz: TimeZone = TimeZone.getDefault()) =
         items.filter { !it.sample && monthKey(it.ts, tz) == key }.sumOf { it.spent }
@@ -150,7 +157,7 @@ object ReportLogic {
     fun monthCount(items: List<ReportItem>, key: String, tz: TimeZone = TimeZone.getDefault()) =
         items.count { !it.sample && monthKey(it.ts, tz) == key }
 
-    fun totalSaved(items: List<ReportItem>) = items.filter { !it.sample }.sumOf { it.saved }
+    fun totalSaved(items: List<ReportItem>) = items.filter { !it.sample && !it.assumed }.sumOf { it.saved }
 }
 
 /** ReportLogic 이 보는 최소 형태(app 패키지의 ReportEntry 가 구현). */
@@ -160,6 +167,8 @@ interface ReportItem {
     val spent: Long
     val saved: Long
     val sample: Boolean
+    /** 가정 단가 기준으로 기록된 항목(지출은 실제 요금 아님, 절약액 의미 없음). */
+    val assumed: Boolean get() = false
 }
 
 /** adb 시연 수신 값 검증(순수). 범위 밖/알 수 없는 값은 Ignore. */

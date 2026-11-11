@@ -16,6 +16,7 @@ enum class Page(val label: String) { CANDIDATES("후보"), REPORT("리포트"), 
 data class ReportEntry(
     override val ts: Long, override val name: String, val kind: EnergyKind, val quantity: Double,
     override val spent: Long, override val saved: Long, override val sample: Boolean = false,
+    override val assumed: Boolean = false,
 ) : ReportItem {
     val monthKey: String get() = ReportLogic.monthKey(ts)
 }
@@ -66,7 +67,7 @@ object StateCodec {
         p.selectedId?.let { put("selectedId", it) }
         put("report", JSONArray().also { a ->
             p.report.forEach { e ->
-                a.put(JSONObject().put("ts", e.ts).put("name", e.name).put("kind", e.kind.name).put("qty", e.quantity).put("spent", e.spent).put("saved", e.saved).put("sample", e.sample))
+                a.put(JSONObject().put("ts", e.ts).put("name", e.name).put("kind", e.kind.name).put("qty", e.quantity).put("spent", e.spent).put("saved", e.saved).put("sample", e.sample).also { if (e.assumed) it.put("assumed", true) })
             }
         })
         put("armed", p.armed)
@@ -102,7 +103,7 @@ object StateCodec {
             kind = runCatching { EnergyKind.valueOf(e.getString("kind")) }.getOrDefault(EnergyKind.FUEL),
             quantity = if (qty.isFinite()) qty.coerceIn(0.0, 10_000.0) else return null,
             spent = e.getLong("spent").coerceIn(0L, MAX_WON), saved = e.getLong("saved").coerceIn(-MAX_WON, MAX_WON),
-            sample = e.optBoolean("sample", false),
+            sample = e.optBoolean("sample", false), assumed = e.optBoolean("assumed", false),
         )
     }
 

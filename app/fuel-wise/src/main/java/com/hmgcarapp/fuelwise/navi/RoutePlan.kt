@@ -20,6 +20,38 @@ fun interface RouteStateProvider {
     suspend fun routeMode(): RouteMode
 }
 
+/** 활성 경로의 실제 목적지 질의. 미연결·미지원·무응답·실패는 null(호출한 쪽은 목적지 없음으로 폴백). */
+fun interface DestinationProvider {
+    suspend fun routeDestination(): com.hmgcarapp.fuelwise.domain.RouteDestination?
+}
+
+/**
+ * 활성 경로의 목적지를 주기적으로 갱신하는 판단(순수; 호출 시점은 앱의 기존 위치/재시도 루프가 정한다).
+ * [minIntervalMs] 안에는 다시 묻지 않고, 활성 경로가 아니거나 질의가 실패하면 null(= 현행 왕복 근사).
+ */
+class RouteDestinationPoller(
+    private val modes: RouteStateProvider,
+    private val dests: DestinationProvider,
+    private val clock: () -> Long,
+    private val minIntervalMs: Long = 30_000L,
+    private val timeoutMs: Long = 2500L,
+) {
+    private var lastAt: Long? = null
+
+    fun due(): Boolean { val t = lastAt ?: return true; val dt = clock() - t; return dt < 0 || dt >= minIntervalMs }
+
+    /** 한 번 질의한다. 예외·시간 초과·잘못된 좌표는 모두 null. */
+    suspend fun poll(): com.hmgcarapp.fuelwise.domain.RouteDestination? {
+        lastAt = clock()
+        val mode = try { withTimeoutOrNull(timeoutMs) { modes.routeMode() } ?: RouteMode.UNKNOWN }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (t: Throwable) { RouteMode.UNKNOWN }
+        if (mode != RouteMode.ACTIVE) return null
+        val d = try { withTimeoutOrNull(timeoutMs) { dests.routeDestination() } }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (t: Throwable) { null }
+        return d?.takeIf { it.pos.lat in -90.0..90.0 && it.pos.lon in -180.0..180.0 && !(it.pos.lat == 0.0 && it.pos.lon == 0.0) }
+    }
+}
+
 data class RoutePlan(val mode: RouteMode, val action: NaviAction, val ask: String) {
     /** 확인 불가(UNKNOWN)라 기존 경로를 덮어쓸 수 있는 요청인지(단음절 음성 수락 금지·수동 확인 팝업 대상). */
     val canOverwrite: Boolean get() = mode == RouteMode.UNKNOWN && action == NaviAction.REQUEST_ROUTE

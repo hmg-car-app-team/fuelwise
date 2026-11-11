@@ -14,7 +14,9 @@ import com.hmgcarapp.core.voice.PleosListener
 import com.hmgcarapp.core.voice.PleosSpeaker
 import com.hmgcarapp.core.voice.Speaker
 import com.hmgcarapp.fuelwise.data.CandidateLoader
+import com.hmgcarapp.fuelwise.data.DataLabels
 import com.hmgcarapp.fuelwise.data.StationRepositories
+import com.hmgcarapp.fuelwise.data.StationRepository
 import com.hmgcarapp.fuelwise.domain.AlertEffect
 import com.hmgcarapp.fuelwise.domain.AlertEvent
 import com.hmgcarapp.fuelwise.domain.AlertFlow
@@ -35,6 +37,7 @@ import com.hmgcarapp.fuelwise.domain.StoreRules
 import com.hmgcarapp.fuelwise.domain.safelyCatching
 import com.hmgcarapp.fuelwise.navi.NaviController
 import com.hmgcarapp.fuelwise.navi.RouteAdvisor
+import com.hmgcarapp.fuelwise.navi.RouteDestinationPoller
 import com.hmgcarapp.fuelwise.vehicle.PleosEnergySource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -79,8 +82,11 @@ class AppController(
     private val _state = MutableStateFlow(UiState(debuggable = debuggable))
     val state: StateFlow<UiState> = _state
     private val runner = AlertRunner(scope, speaker, listener, navi, RouteAdvisor(navi), { _state.value }, debuggable, ::dispatch)
+    private val repo: StationRepository
     private var defaultLoadJob: Job? = null
     private var saveJob: Job? = null
+    private var pollJob: Job? = null
+    private val destPoller = RouteDestinationPoller(navi, navi, monoClock)
     /** AUTO 에서 차량 신호로 마지막으로 확인된 도메인(일시 null 로 EV<->FUEL 이 뒤집히지 않게). 메모리 전용. */
     private var stickyKind: EnergyKind? = null
     // init 에서 쓰이므로 init 보다 먼저 선언(선언 순서가 init 뒤면 초기화가 등록한 값을 덮어쓴다)
@@ -90,6 +96,7 @@ class AppController(
 
     init {
         val r = StationRepositories.create(context, apiKey)
+        repo = r.repo
         loader = CandidateLoader(r.repo, clock = monoClock)
         _state.update { it.copy(dataLabel = r.info.label) }
         // 시연 상태는 저장하지 않는다: 앱 시작은 항상 실신호.
@@ -115,10 +122,11 @@ class AppController(
                 dispatch(AlertEvent.LocationReady)
                 if (loader.needsReload(o)) applyLoad(o)
                 recompute()
+                pollRouteDestination()
             } }
         }
         // 후보가 비어 있는 동안 30초 주기로 재로드(주차 중 위치 갱신이 없어도). 로드 실패 후 공백 방지.
-        scope.launch { while (true) { delay(RETRY_CHECK_MS); if (loader.retryDue()) applyLoad(_state.value.origin) } }
+        scope.launch { while (true) { delay(RETRY_CHECK_MS); if (loader.retryDue()) applyLoad(_state.value.origin); pollRouteDestination() } }
         scope.launch { delay(AlertGate.ORIGIN_TIMEOUT_MS); if (!_state.value.originReal) { dispatch(AlertEvent.OriginWaitElapsed); recompute() } }
         if (debuggable) simReceiver = SimReceiver.register(context, this, monoClock)
     }
@@ -170,8 +178,21 @@ class AppController(
     /** 최신 origin 의 결과만 반영한다(오래된 로드는 [CandidateLoader] 가 버림). */
     private suspend fun applyLoad(origin: LatLon) {
         val list = loader.load(origin) ?: return
-        _state.update { it.copy(candidates = list) }
+        val meta = repo.evMeta
+        _state.update { it.copy(candidates = list, dataLabel = DataLabels.full(meta), dataShort = DataLabels.short(meta), evMeta = meta) }
         recompute()
+    }
+
+    /** 읽기 전용 목적지 질의(30초 간격 제한, 한 번에 하나). 기존 위치 갱신/재시도 루프에서만 호출한다. 실패는 목적지 없음으로 폴백. */
+    private fun pollRouteDestination() {
+        if (!restored || pollJob?.isActive == true || !destPoller.due()) return
+        pollJob = scope.launch {
+            val d = try { destPoller.poll() } catch (e: CancellationException) { throw e } catch (t: Throwable) { HmgLog.w("Navi", "목적지 질의 예외(무시): $t"); null }
+            val before = _state.value.routeDest
+            if (d == before) return@launch
+            _state.update { it.copy(routeDest = d) }
+            if (d?.pos != before?.pos) recompute() // 남은 거리만 바뀐 경우는 재계산하지 않는다
+        }
     }
 
     /** 앱 시작/재개·권한 부여 시: 신호 폴링 게이트를 풀고 즉시 재시도, 내비 연결이 끊겨 있으면 재연결. */
@@ -191,9 +212,10 @@ class AppController(
         stickyKind = r.sticky
         val cards = Presets.discounts.filter { it.id in p.cards }
         val qty = Recommender.quantityFor(r.kind, r.level, s)
-        val near = Recommender.nearby(prev.candidates, prev.origin)
+        val dest = prev.evalDest
+        val near = Recommender.candidatesFor(prev.candidates, prev.origin, dest, r.rangeKm?.toDouble())
         val quotes = Recommender.sort(
-            Recommender.evaluate(EvalInput(prev.origin, prev.destination?.pos, r.kind, s, cards, qty), near), s.sort,
+            Recommender.evaluate(EvalInput(prev.origin, dest, r.kind, s, cards, qty), near), s.sort,
         )
         // 후보가 하나도 없으면(로드 전·범위 밖) 저장된 선택을 건드리지 않는다
         val selected = if (quotes.isEmpty()) p.selectedId else p.selectedId?.takeIf { id -> quotes.any { it.candidate.id == id } } ?: quotes.first().candidate.id
@@ -278,9 +300,11 @@ class AppController(
             dispatch(AlertEvent.Notify("방금 같은 곳을 기록했어요"))
             return@parkedOnly
         }
-        val e = ReportEntry(now, q.candidate.name, q.candidate.kind, q.quantity, q.totalCost, q.netSaving)
+        val assumed = q.candidate.priceAssumed
+        // 가정 단가 후보: 지출은 가정값이고 절약액은 의미가 없어 0 으로 기록하고 플래그를 남긴다
+        val e = ReportEntry(now, q.candidate.name, q.candidate.kind, q.quantity, q.totalCost, if (assumed) 0L else q.netSaving, assumed = assumed)
         updateP { it.copy(report = StateCodec.capReport(it.report + e)) }
-        dispatch(AlertEvent.Notify(StoreRules.recordedMessage(q.candidate.name, q.netSaving, _state.value.saveHeld)))
+        dispatch(AlertEvent.Notify(StoreRules.recordedMessage(q.candidate.name, q.netSaving, _state.value.saveHeld, assumed)))
     }
 
     /** 시연용 샘플 기록(debuggable 전용). sample=true 라 합계에서 제외된다. */

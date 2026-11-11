@@ -36,6 +36,26 @@ class RecommenderTest {
         assertTrue(c.filter { it.kind == EnergyKind.FUEL }.all { it.fuelPrices.size == 4 })
     }
 
+    /** 기준이 가정 단가이고 후보가 명시적 비가정이면 절약은 가정값 근거라 0 으로 억제한다(혼합). 반대 혼합도 같다. */
+    @Test fun mixedAssumedBaseline_suppressesSaving() {
+        val pos = LatLon(37.49, 127.06)
+        fun ev(id: String, p: Int, assumed: Boolean) = Candidate(id, id, "X", EnergyKind.EV, pos, emptyMap(), pricePerKwh = p, chargerKw = 50.0, priceAssumed = assumed)
+        val inp = EvalInput(origin, null, EnergyKind.EV, Settings(), emptyList(), 30.0)
+        val q1 = Recommender.evaluate(inp, listOf(ev("a", 400, true), ev("b", 200, false)))
+        val b = q1.first { it.candidate.id == "b" }
+        assertFalse(b.savingComparable); assertEquals(0L, b.netSaving); assertEquals(0L, b.grossSaving)
+        val q2 = Recommender.evaluate(inp, listOf(ev("a", 400, false), ev("b", 200, true)))
+        assertTrue(q2.none { it.savingComparable && !it.isBaseline } || q2.filter { !it.isBaseline }.all { it.netSaving == 0L })
+        val q3 = Recommender.evaluate(inp, listOf(ev("a", 400, false), ev("b", 200, false)))
+        assertTrue(q3.first { !it.isBaseline }.netSaving > 0)
+    }
+
+    @Test fun sortLabelForAssumedList() {
+        assertEquals("우회·대기 기준 순", SortKey.COST.labelFor(true))
+        assertEquals("실질 비용순", SortKey.COST.labelFor(false))
+        assertEquals("가격순", SortKey.PRICE.labelFor(true))
+    }
+
     /** 같은 위치(우회 동일) 두 주유소, 가격차 30원 x 40L, 우회 0 -> 실질 절약 정확히 1,200원 */
     @Test fun twoStations_samePlace_saving1200_exact() {
         val pos = LatLon(37.49, 127.06)

@@ -3,6 +3,7 @@ package com.hmgcarapp.fuelwise.navi
 import ai.pleos.playground.navi.constants.NaviErrorCode
 import ai.pleos.playground.navi.constants.RouteOption
 import ai.pleos.playground.navi.constants.WaypointIndex
+import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.RouteStateInfo
@@ -16,6 +17,8 @@ import com.hmgcarapp.core.connection.ManagedConnection
 import com.hmgcarapp.core.log.HmgLog
 import com.hmgcarapp.fuelwise.domain.Candidate
 import com.hmgcarapp.fuelwise.domain.Destination
+import com.hmgcarapp.fuelwise.domain.LatLon
+import com.hmgcarapp.fuelwise.domain.RouteDestination
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -41,7 +44,7 @@ class NaviController(
     private val context: Context,
     private val scope: CoroutineScope,
     private val debuggable: Boolean = false,
-) : RouteStateProvider, NaviPort {
+) : RouteStateProvider, DestinationProvider, NaviPort {
     private val _status = MutableStateFlow<NaviStatus>(NaviStatus.Idle)
     val status: StateFlow<NaviStatus> = _status
     private val _log = MutableStateFlow<List<String>>(emptyList())
@@ -49,6 +52,7 @@ class NaviController(
 
     // SDK 콜백 스레드와 공유
     @Volatile private var routeQuery: CompletableDeferred<Boolean?>? = null
+    @Volatile private var destQuery: CompletableDeferred<DestinationInfo?>? = null
     @Volatile private var timeoutJob: Job? = null
     /** release() 뒤에는 connect() 를 하지 않는다(해제된 컨트롤러가 SDK 를 다시 붙잡지 않게). */
     @Volatile private var released = false
@@ -63,6 +67,7 @@ class NaviController(
         override fun onRoutingCompleted() { note("onRoutingCompleted"); conn.onResponseNow(); transition { NaviReducer.onSuccess(it, NaviText.ROUTE_STARTED) } }
         override fun onWaypointChanged(info: WaypointChangedInfo) { note("onWaypointChanged"); conn.onResponseNow(); transition { NaviReducer.onSuccess(it, NaviText.WAYPOINT_ADDED) } }
         override fun onDestinationChanged() { note("onDestinationChanged") }
+        override fun onDestinationInfo(destinationInfo: DestinationInfo) { note("onDestinationInfo"); destQuery?.complete(destinationInfo) }
         override fun onError(code: NaviErrorCode) { note("onError $code"); conn.onResponseNow(); transition { NaviReducer.onError(it, code.name) } }
         override fun onRouteStateInfo(routeStateInfo: RouteStateInfo) {
             note("onRouteStateInfo isRouting=${routeStateInfo.isRouting}")
@@ -110,6 +115,7 @@ class NaviController(
             runCatching { h.removeListener(listener) }
             runCatching { h.release() }
             routeQuery?.complete(null)
+            destQuery?.complete(null)
         },
         isConnectionFailure = { true },
         clock = android.os.SystemClock::elapsedRealtime,
@@ -164,6 +170,28 @@ class NaviController(
             note("경로 상태 질의 예외: ${t.javaClass.simpleName}"); discardAndReconnect(); RouteMode.UNKNOWN
         } finally {
             if (routeQuery === d) routeQuery = null
+        }
+    }
+
+    /**
+     * 활성 경로의 실제 목적지(getDestinationInfo, 읽기 전용). 미연결·예외·무응답(2초)은 null 이며 앱 흐름을 막지 않는다.
+     * 에뮬레이터에서는 내비 엔진이 경로를 만들지 못해 응답을 확인하지 못했다(실차 미검증).
+     */
+    override suspend fun routeDestination(): RouteDestination? = queryMutex.withLock {
+        if (!ensureConnected()) return@withLock null
+        val h = conn.readyConn()?.value ?: return@withLock null
+        val d = CompletableDeferred<DestinationInfo?>()
+        destQuery = d
+        try {
+            h.getDestinationInfo()
+            withTimeoutOrNull(2000L) { d.await() }?.let { RouteDestination(LatLon(it.latitude, it.longitude), name(it.name), it.remainDistance) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // 읽기 전용 질의: 공유 NaviHelper 를 폐기하면 진행 중인 경유지/경로 요청의 리스너가 사라지므로 재연결하지 않는다.
+            note("목적지 질의 예외: ${t.javaClass.simpleName}"); null
+        } finally {
+            if (destQuery === d) destQuery = null
         }
     }
 

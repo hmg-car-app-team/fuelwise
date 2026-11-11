@@ -9,6 +9,7 @@ import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.LatLon
 import com.hmgcarapp.fuelwise.domain.Presets
 import com.hmgcarapp.fuelwise.domain.Quote
+import com.hmgcarapp.fuelwise.domain.RouteDestination
 import com.hmgcarapp.fuelwise.domain.Recommender
 import com.hmgcarapp.fuelwise.domain.ReplaceConfirm
 import com.hmgcarapp.fuelwise.domain.Settings
@@ -18,6 +19,10 @@ data class UiState(
     val p: Persisted = Persisted(),
     val candidates: List<Candidate> = emptyList(),
     val dataLabel: String = "불러오는 중",
+    /** 헤더용 짧은 데이터 라벨 */
+    val dataShort: String = "불러오는 중",
+    /** 충전소 공공데이터 스냅샷 출처(실데이터일 때만; 가공 샘플이면 null) */
+    val evMeta: com.hmgcarapp.fuelwise.data.EvMeta? = null,
     val origin: LatLon = DEFAULT_ORIGIN,
     val energy: EnergyReading = EnergyReading(),
     val kind: EnergyKind = EnergyKind.FUEL,
@@ -36,6 +41,8 @@ data class UiState(
     /** 에너지 모드가 자동이 아닐 때 헤더에 붙일 안내('(설정: 전기)'). */
     val modeNote: String? = null,
     /** 읽기 오류 또는 쓰기 실패로 이번 실행 동안 저장을 보류 중(설정 화면에 상시 표시). 세션 중 재읽기는 없다: 회복은 앱 재시작 또는 '기록 모두 삭제'(성공 시 쓰기 재개). */
+    /** 내비 활성 경로의 실제 목적지(읽기 전용 질의 결과; 없거나 실패면 null). 평가에만 쓰고 안내 방식(경유지/직접)은 바꾸지 않는다. */
+    val routeDest: RouteDestination? = null,
     val saveHeld: Boolean = false,
     /** 손상된 저장 파일을 보존본(.corrupt)으로 남긴 상태(삭제 버튼 활성 조건; 전체 삭제 때 해제). */
     val corruptKept: Boolean = false,
@@ -47,6 +54,8 @@ data class UiState(
     val settings: Settings get() = p.settings
     /** 샘플 목적지는 debuggable 시연에서만 유효. 기본은 목적지 없음. */
     val destination: Destination? get() = if (debuggable) settings.destinationIndex?.let { Presets.destinations.getOrNull(it) } else null
+    /** 우회 평가에 쓰는 목적지: 시연 목적지가 우선, 없으면 내비 활성 경로의 목적지. 둘 다 없으면 null(왕복 근사). */
+    val evalDest: LatLon? get() = destination?.pos ?: routeDest?.pos
     val selected: Quote? get() = quotes.firstOrNull { it.candidate.id == p.selectedId }
     val best: Quote? get() = Recommender.best(quotes)
 

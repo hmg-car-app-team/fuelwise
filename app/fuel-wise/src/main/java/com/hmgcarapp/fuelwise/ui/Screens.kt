@@ -25,10 +25,12 @@ import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.delay
 import com.hmgcarapp.core.drive.DriveState
 import com.hmgcarapp.core.ui.rememberDriveSnapshot
+import com.hmgcarapp.fuelwise.data.DataLabels
 import com.hmgcarapp.fuelwise.app.AppController
 import com.hmgcarapp.fuelwise.app.Page
 import com.hmgcarapp.fuelwise.app.UiState
 import com.hmgcarapp.fuelwise.domain.AlertText
+import com.hmgcarapp.fuelwise.domain.DetourText
 import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.ReportLogic
 import com.hmgcarapp.fuelwise.domain.Recommender
@@ -101,7 +103,7 @@ fun FuelWiseApp(c: AppController) {
     PleosScaffold(
         title = "알뜰주유",
         // 판정 근거(snap.reason)·내부 용어는 debuggable 에서만 노출
-        subtitle = "${s.dataLabel} · ${if (driving) "주행 중" else "정차 중"}" + if (c.debuggable) " · ${snap.reason}" else "",
+        subtitle = "${s.dataShort} · ${if (driving) "주행 중" else "정차 중"}" + if (c.debuggable) " · ${snap.reason}" else "",
         toastState = toast,
         actions = {
             // 시연 전용(debuggable): 실신호 / 주행 강제. '정차' override 는 core 규칙상 효과가 없어 제거(정차 화면은 실신호 P단·속도 0 으로 확인)
@@ -229,32 +231,37 @@ private fun CandidatesMaster(c: AppController, s: UiState, onOpenDetail: () -> U
     LazyColumn(Modifier.fillMaxSize().testTag("candidate_list"), verticalArrangement = Arrangement.spacedBy(PleosSpacing.xs)) {
         item { EnergyCard(s) }
         item {
-            PleosSegmentedTabs(SortKey.entries.map { it.label }, s.settings.sort.ordinal, { c.setSort(SortKey.entries[it]) }, Modifier.fillMaxWidth())
+            PleosSegmentedTabs(SortKey.entries.map { it.labelFor(s.quotes.any { q -> q.candidate.priceAssumed }) }, s.settings.sort.ordinal, { c.setSort(SortKey.entries[it]) }, Modifier.fillMaxWidth())
         }
         item {
             val d = s.destination
             Txt(
-                if (d != null) "경로 부근 추천: 현재 위치 → ${d.name} 방향 · 직선거리 근사" else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 후보 · 현재 위치 기준 왕복 우회(직선거리 근사)",
+                if (d != null) "경로 부근 추천: 현재 위치 → ${d.name} 방향 · ${DetourText.ROUTE_ESTIMATE}"
+                else if (s.routeDest != null) "내비 안내 경로 부근 · ${DetourText.ROUTE_ESTIMATE}"
+                else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 후보 · ${DetourText.ROUNDTRIP_ESTIMATE}",
                 PleosTheme.typography.labelMedium, secondary = true,
             )
+            Txt(s.dataLabel, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("data_label"))
         }
         items(s.quotes, key = { it.candidate.id }) { q ->
             val isBest = q.candidate.id == s.best?.candidate?.id
             PleosListItem(
                 title = (if (isBest) "추천 · " else "") + q.candidate.name,
                 description = if (q.candidate.kind == EnergyKind.FUEL) "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/L · 우회 ${String.format(Locale.KOREA, "%.1f", q.detourKm)}km · 총 ${won(q.totalCost)}"
+                else if (q.candidate.priceAssumed) "${DataLabels.assumedUnit(s.evMeta, q.listUnitPrice.toInt())}" + (if (q.unitPrice != q.listUnitPrice) " → 할인 적용 ${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/kWh" else "") + " · ${q.candidate.chargerKw?.toInt()}kW · 대기 0분 가정 · 총 ${won(q.totalCost)}(가정 단가 기준)"
                 else "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/kWh · ${q.candidate.chargerKw?.toInt()}kW · 대기 ${q.candidate.waitMin}분 · 총 ${won(q.totalCost)}",
                 selected = q.candidate.id == s.p.selectedId,
                 onClick = { c.select(q.candidate.id); onOpenDetail() },
                 trailing = {
                     if (q.isBaseline) PleosStatusBadge("기준", PleosStatus.Neutral)
+                    else if (q.candidate.priceAssumed || !q.savingComparable) PleosStatusBadge("요금 비교 불가", PleosStatus.Neutral)
                     else PleosStatusBadge(signedWon(q.netSaving), if (q.netSaving > 0) PleosStatus.Positive else PleosStatus.Negative)
                 },
             )
         }
         if (s.quotes.isEmpty()) item {
             Txt(
-                if (s.candidates.isEmpty()) "표시할 후보가 없어요." else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 안에 후보가 없어요. 샘플 데이터는 서울 강남 인근에만 있어요.",
+                if (s.candidates.isEmpty()) "표시할 후보가 없어요." else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 안에 후보가 없어요. 번들 데이터는 수도권 일대에만 있어요.",
                 secondary = true, modifier = Modifier.testTag("empty_candidates"),
             )
         }
@@ -278,20 +285,22 @@ private fun CandidateDetail(c: AppController, s: UiState) {
     if (q == null) { PleosPanel(Modifier.fillMaxWidth()) { Txt(if (s.quotes.isEmpty()) "표시할 후보가 없어요." else "후보를 선택하세요.", secondary = true) }; return }
     val unit = if (q.candidate.kind == EnergyKind.FUEL) "L" else "kWh"
     PleosPanel(Modifier.fillMaxWidth(), title = q.candidate.name) {
-        Txt("${q.candidate.brand} · ${if (q.candidate.kind == EnergyKind.FUEL) "주유소" else "충전소"} · 가공 샘플", PleosTheme.typography.labelMedium, secondary = true)
-        KV("표시 단가", "${String.format(Locale.KOREA, "%,.0f", q.listUnitPrice)}원/$unit")
+        Txt("${q.candidate.brand} · ${if (q.candidate.kind == EnergyKind.FUEL) "주유소" else "충전소"} · ${if (q.candidate.priceAssumed) "공공데이터 스냅샷(요금은 가정)" else "가공 샘플"}", PleosTheme.typography.labelMedium, secondary = true)
+        if (q.candidate.priceAssumed) Txt("${DataLabels.assumedUnit(s.evMeta)}: 원본에 가격 정보가 없어 가정한 값이라 실제 요금과 다를 수 있어요. 대기 0분도 가정이며 실시간 사용 가능 여부가 아니에요.", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("d_assumed"))
+        KV(if (q.candidate.priceAssumed) "가정 단가" else "표시 단가", "${String.format(Locale.KOREA, "%,.0f", q.listUnitPrice)}원/$unit")
         KV("할인 적용 단가", "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/$unit" + (q.discountName?.let { " ($it)" } ?: ""), tag = "d_unit")
         KV("주입량", "${String.format(Locale.KOREA, "%.1f", q.quantity)}$unit")
         KV("주입 비용", won(q.fillCost), tag = "d_fill")
-        KV("우회 거리(추정)", "${String.format(Locale.KOREA, "%.1f", q.detourKm)}km")
+        KV(DetourText.label(s.evalDest != null), "${String.format(Locale.KOREA, "%.1f", q.detourKm)}km")
         KV("우회 ${if (q.candidate.kind == EnergyKind.FUEL) "연료비" else "전력비"}", won(q.detourEnergyCost), tag = "d_detour")
-        KV("총비용", won(q.totalCost), tag = "d_total")
+        KV(if (q.candidate.priceAssumed) "총비용(가정 단가 기준)" else "총비용", won(q.totalCost), tag = "d_total")
         if (q.candidate.kind == EnergyKind.EV) {
             KV("충전 출력", "${q.candidate.chargerKw?.toInt()}kW (차량 한도 ${s.settings.evMaxKw}kW)")
             KV("예상 소요", "${String.format(Locale.KOREA, "%.0f", q.extraMin + q.chargeMin)}분 (이동+대기 ${String.format(Locale.KOREA, "%.0f", q.extraMin)} + 충전 ${String.format(Locale.KOREA, "%.0f", q.chargeMin)})")
             KV("시간 환산 비용", won(q.timeCost))
         }
         if (q.isBaseline) PleosStatusBadge("기준 후보(우회 최소)", PleosStatus.Neutral)
+        else if (q.candidate.priceAssumed || !q.savingComparable) Txt(DataLabels.ASSUMED_NO_COMPARE, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("d_no_compare"))
         else {
             KV("가격만 비교한 절약", signedWon(q.grossSaving))
             PleosStatusBadge("실질 절약 ${signedWon(q.netSaving)}", if (q.netSaving > 0) PleosStatus.Positive else PleosStatus.Negative, Modifier.testTag("d_net"))
@@ -316,8 +325,10 @@ private fun ReportMaster(s: UiState) {
     PleosPanel(Modifier.fillMaxWidth(), title = "이번 달($key) 추정 절약") {
         Txt(won(ReportLogic.monthSaved(items, key)), PleosTheme.typography.headlineSmall, modifier = Modifier.testTag("month_saved"))
         KV("기록 횟수", "${ReportLogic.monthCount(items, key)}회")
-        KV("총 지출", won(ReportLogic.monthSpent(items, key)))
+        val assumedN = ReportLogic.monthAssumedCount(items, key)
+        KV(if (assumedN > 0) "총 지출(가정 단가 포함)" else "총 지출", won(ReportLogic.monthSpent(items, key)))
         KV("누적(전체) 추정 절약", won(ReportLogic.totalSaved(items)))
+        if (assumedN > 0) Txt("충전소 ${assumedN}건: ${DataLabels.ASSUMED_REPORT_NOTE}. 이 항목의 절약은 합계에 넣지 않았어요.", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("report_assumed_note"))
         if (sampleCount > 0) Txt("샘플 기록 ${sampleCount}건은 합계에서 제외했어요.", PleosTheme.typography.labelMedium, secondary = true)
     }
 }
@@ -330,8 +341,8 @@ private fun ReportDetail(c: AppController, s: UiState) {
         s.p.report.sortedByDescending { it.ts }.forEach { e ->
             PleosListItem(
                 title = e.name + if (e.sample) " [샘플]" else "",
-                description = "${fmt.format(Date(e.ts))} · ${String.format(Locale.KOREA, "%.1f", e.quantity)}${if (e.kind == EnergyKind.FUEL) "L" else "kWh"} · 지출 ${won(e.spent)}",
-                trailing = { PleosStatusBadge("추정 " + signedWon(e.saved), if (e.saved > 0) PleosStatus.Positive else PleosStatus.Neutral) },
+                description = "${fmt.format(Date(e.ts))} · ${String.format(Locale.KOREA, "%.1f", e.quantity)}${if (e.kind == EnergyKind.FUEL) "L" else "kWh"} · 지출 ${won(e.spent)}" + if (e.assumed) " (가정 단가 기준·실제 요금 아님)" else "",
+                trailing = { if (e.assumed) PleosStatusBadge("절약 산정 안 함", PleosStatus.Neutral) else PleosStatusBadge("추정 " + signedWon(e.saved), if (e.saved > 0) PleosStatus.Positive else PleosStatus.Neutral) },
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m)) {
@@ -420,6 +431,10 @@ private fun SettingsMaster(c: AppController, s: UiState, summary: Boolean = fals
 /** 설정 상세: 기록 초기화(항상) + 시연 패널(debuggable 만). */
 @Composable
 private fun SettingsDetail(c: AppController, s: UiState) {
+    PleosPanel(Modifier.fillMaxWidth(), title = "데이터 출처") {
+        Txt(s.dataLabel, PleosTheme.typography.labelMedium, secondary = true)
+        if (s.evMeta != null) Txt(DataLabels.ATTRIBUTION, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("attribution"))
+    }
     PleosPanel(Modifier.fillMaxWidth(), title = "저장된 기록") {
         Txt("주유소/충전소명·시각·수량·금액을 이 기기에만 평문(암호화 없음)으로 저장해요. 위치 이력은 저장하지 않아요.", PleosTheme.typography.labelMedium, secondary = true)
         KV("기록", "${s.p.report.size}건")

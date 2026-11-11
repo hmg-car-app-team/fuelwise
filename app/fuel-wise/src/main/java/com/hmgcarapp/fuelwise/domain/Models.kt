@@ -6,11 +6,15 @@ enum class FuelGrade(val label: String) { GASOLINE("휘발유"), PREMIUM("고급
 
 enum class EnergyMode(val label: String) { AUTO("자동"), FUEL("내연기관"), EV("전기차") }
 
-enum class SortKey(val label: String) { COST("실질 비용순"), PRICE("가격순"), DISTANCE("우회 적은 순") }
+enum class SortKey(val label: String) {
+    COST("실질 비용순"), PRICE("가격순"), DISTANCE("우회 적은 순");
+    /** 가정 단가 목록(충전소 스냅샷)에서는 '실질 비용'이 요금 근거가 없으므로 '우회·대기 기준 순'으로 표기한다. 주유소 목록은 불변. */
+    fun labelFor(assumedList: Boolean): String = if (this == COST && assumedList) "우회·대기 기준 순" else label
+}
 
 data class LatLon(val lat: Double, val lon: Double)
 
-/** 주유소/충전소 후보. 가격은 가공 샘플(오피넷/공공데이터 원본 아님). */
+/** 주유소/충전소 후보. 주유 가격은 가공 샘플(오피넷 원본 아님), 충전소는 공공데이터 스냅샷일 수 있음(단가는 가정). */
 data class Candidate(
     val id: String,
     val name: String,
@@ -23,6 +27,8 @@ data class Candidate(
     val pricePerKwh: Int? = null,
     val chargerKw: Double? = null,
     val waitMin: Int = 0,
+    /** 충전소: 단가가 원본 가격이 아니라 가정 단가인지(공공데이터 스냅샷은 항상 true). 대기 0분도 가정값. */
+    val priceAssumed: Boolean = false,
 )
 
 /** 할인 카드/멤버십. brands 가 비어 있으면 모든 브랜드. */
@@ -73,4 +79,14 @@ object Presets {
         Discount("card_all", "샘플 멤버십 B (전 브랜드 -20원/L)", emptySet(), wonPerLiter = 20),
         Discount("ev_member", "샘플 충전 멤버십 (충전 10% 할인)", emptySet(), evPercent = 10),
     )
+}
+
+/** 내비 활성 경로의 실제 목적지(읽기 전용 질의 결과). [remainDistance] 는 SDK 가 준 남은 거리 값(단위 미확인: 계산에 쓰지 않는다). */
+data class RouteDestination(val pos: LatLon, val name: String? = null, val remainDistance: Int? = null)
+
+/** 우회 표기 문구. 목적지 유무에 따라 근사 방식이 다름을 구분해 보여 준다(둘 다 직선 근사, 실제 경로 아님). */
+object DetourText {
+    const val ROUTE_ESTIMATE = "경로 추정 우회(직선 근사)"
+    const val ROUNDTRIP_ESTIMATE = "왕복 추정(목적지 없음)"
+    fun label(hasDestination: Boolean) = if (hasDestination) ROUTE_ESTIMATE else ROUNDTRIP_ESTIMATE
 }

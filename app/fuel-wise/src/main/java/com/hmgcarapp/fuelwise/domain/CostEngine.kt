@@ -68,6 +68,8 @@ data class Quote(
     /** 기준 후보 대비 가격만의 절약(우회 미반영) */
     val grossSaving: Long,
     val isBaseline: Boolean = false,
+    /** 기준 또는 이 후보 중 하나라도 가정 단가면 false: 절약(netSaving/grossSaving)은 0 으로 두고 표기·음성·배너에서 쓰지 않는다. */
+    val savingComparable: Boolean = true,
 )
 
 data class EvalInput(
@@ -87,6 +89,24 @@ object Recommender {
     /** 현재 위치에서 [radiusKm] 이내(경계 포함) 후보만. */
     fun nearby(candidates: List<Candidate>, origin: LatLon, radiusKm: Double = CANDIDATE_RADIUS_KM): List<Candidate> =
         candidates.filter { CostEngine.haversineKm(origin, it.pos) <= radiusKm }
+
+    /** 목적지 방향 후보 탐색 거리(현재 위치 기준 직선거리). */
+    const val ROUTE_LOOKAHEAD_KM = 60.0
+
+    /** 목적지 방향 후보로 인정하는 우회 상한(km, 직선 근사 x 도로계수 적용 후). */
+    const val DETOUR_LIMIT_KM = 3.0
+
+    /**
+     * 비교 후보 범위. 목적지가 없으면 [nearby] 와 같다. 있으면 기존 반경 안 후보는 그대로 두고(기존 동작 보존),
+     * 반경 밖이라도 [ROUTE_LOOKAHEAD_KM] 이내이면서 우회가 [DETOUR_LIMIT_KM] 이하인 목적지 방향 후보를 더한다.
+     * [rangeKm] 이 있으면 확장 후보는 현재 위치에서 그 거리 이내(경계 포함)여야 한다(도달 불가 후보 배제).
+     */
+    fun candidatesFor(candidates: List<Candidate>, origin: LatLon, dest: LatLon?, rangeKm: Double? = null): List<Candidate> =
+        if (dest == null) nearby(candidates, origin)
+        else candidates.filter { c ->
+            val oa = CostEngine.haversineKm(origin, c.pos)
+            oa <= CANDIDATE_RADIUS_KM || (oa <= ROUTE_LOOKAHEAD_KM && (rangeKm == null || oa <= rangeKm) && DetourModel.detourKm(origin, dest, c.pos) <= DETOUR_LIMIT_KM)
+        }
 
     fun quantityFor(kind: EnergyKind, levelPct: Int, s: Settings): Double = when (kind) {
         EnergyKind.FUEL -> s.tankL * (100 - levelPct).coerceIn(0, 100) / 100.0
@@ -146,20 +166,21 @@ object Recommender {
             val total = fill + detourCost
             val timeCost = if (r.c.kind == EnergyKind.EV) ((r.extraMin + r.chargeMin) * s.evTimeValueWonPerMin).roundToLong() else 0L
             val isBase = r === base
+            val comparable = isBase || !(base.c.priceAssumed || r.c.priceAssumed)
             Quote(
                 candidate = r.c, listUnitPrice = r.listPrice, unitPrice = r.unit, discountName = r.discountName, quantity = input.quantity,
                 fillCost = fill, detourKm = r.detourKm, detourEnergyCost = detourCost, totalCost = total,
                 extraMin = r.extraMin, chargeMin = r.chargeMin, timeCost = timeCost, score = total + timeCost,
-                netSaving = if (isBase) 0L else baseTotal - total,
-                grossSaving = if (isBase) 0L else baseFill - fill,
-                isBaseline = isBase,
+                netSaving = if (isBase || !comparable) 0L else baseTotal - total,
+                grossSaving = if (isBase || !comparable) 0L else baseFill - fill,
+                isBaseline = isBase, savingComparable = comparable,
             )
         }
     }
 
     fun sort(quotes: List<Quote>, key: SortKey): List<Quote> = when (key) {
         SortKey.COST -> quotes.sortedBy { it.score }
-        SortKey.PRICE -> quotes.sortedBy { it.unitPrice }
+        SortKey.PRICE -> quotes.sortedWith(compareBy<Quote>({ it.unitPrice }, { it.detourKm }, { it.candidate.id }))
         SortKey.DISTANCE -> quotes.sortedBy { it.detourKm }
     }
 
