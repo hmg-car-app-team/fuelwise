@@ -27,10 +27,14 @@ class EvSnapshotTest {
     private val gangnam = LatLon(37.505, 127.0499)
     private val incheon = LatLon(37.4563, 126.7052)
 
-    @Test fun realAsset_parses_1058_and_meta() {
-        assertEquals(1058, ev.size)
+    @Test fun realAsset_parses_3103_and_meta() {
+        assertEquals(3103, ev.size)
+        assertEquals(3103, ev.map { it.id }.toSet().size) // id 중복 없음
+        assertTrue(ev.all { it.pos.lat in 33.0..39.0 && it.pos.lon in 124.5..132.0 }) // 남한 좌표 범위(제주~강원·울릉도)
+        assertTrue(ev.any { it.pos.lat < 34.0 } && ev.any { it.pos.lat > 38.0 } && ev.any { it.pos.lon < 126.0 } && ev.any { it.pos.lon > 129.5 })
         assertTrue(ev.all { it.kind == EnergyKind.EV && it.priceAssumed && it.pricePerKwh == 320 && it.waitMin == 0 })
         val m = SampleJsonParser.parseMeta(asset("ev_stations.json"))!!
+        assertEquals(3103, org.json.JSONObject(asset("ev_stations.json")).getJSONObject("_meta").getInt("count"))
         assertEquals("2026-11-11", m.collectedAt); assertEquals(320, m.assumedWon)
         assertTrue(m.license.contains("공공누리 제1유형")); assertTrue(m.source.contains("한국환경공단"))
     }
@@ -63,8 +67,29 @@ class EvSnapshotTest {
         val m = StationData.merge(asset("stations_sample.json"), asset("ev_stations.json"))
         assertNotNull(m.evMeta)
         assertEquals(10, m.candidates.count { it.kind == EnergyKind.FUEL })
-        assertEquals(1058, m.candidates.count { it.kind == EnergyKind.EV })
+        val mergedEv = m.candidates.filter { it.kind == EnergyKind.EV }
+        assertEquals(3103 - 7, mergedEv.size) // 이름·좌표 동일 7건은 하나만
+        assertEquals(mergedEv.size, mergedEv.map { it.id }.toSet().size)
+        assertEquals(mergedEv.size, mergedEv.map { Triple(it.name, Math.round(it.pos.lat * 1e5), Math.round(it.pos.lon * 1e5)) }.toSet().size)
+        assertTrue(mergedEv.all { it.priceAssumed && it.pricePerKwh == 320 }) // 가정 단가 유지
         assertTrue(m.candidates.filter { it.kind == EnergyKind.FUEL }.all { it.fuelPrices.size == 4 && !it.priceAssumed })
+    }
+
+    @Test fun dedupe_keepsHigherKw_andOrder_andParseIsLinearEquivalent() {
+        fun c(id: String, n: String, lat: Double, kw: Double) = Candidate(id, n, "b", EnergyKind.EV, LatLon(lat, 127.0), pricePerKwh = 320, chargerKw = kw)
+        val out = StationData.dedupeEv(listOf(c("a", "x", 37.5, 7.0), c("b", "y", 37.5, 7.0), c("c", "x", 37.5, 100.0), c("d", "x", 37.6, 7.0)))
+        assertEquals(listOf("b", "c", "d"), out.map { it.id })
+        val row = { id: String -> """{"id":"$id","name":"n","lat":37.5,"lon":127.0,"won":320,"kw":50.0}""" }
+        val json = """{"ev":[${row("a")},${row("b")},${row("a")},${row("c")},${row("b")}]}"""
+        assertEquals(listOf("a", "b", "c"), SampleJsonParser.parse(json).map { it.id }) // 첫 항목 유지, 순서 보존
+    }
+
+    @Test fun nationwide_regionsHaveCandidates_andSeaHasNone() {
+        val spots = listOf(LatLon(35.1796, 129.0756) to "부산", LatLon(33.4996, 126.5312) to "제주", LatLon(37.8813, 127.7298) to "춘천", LatLon(35.8714, 128.6014) to "대구", LatLon(35.1595, 126.8526) to "광주")
+        for ((p, n) in spots) assertTrue("후보 없음 $n", Recommender.nearby(ev, p).isNotEmpty())
+        assertTrue(Recommender.nearby(ev, LatLon(35.0, 124.0)).isEmpty()) // 서해 먼 바다
+        assertTrue(Recommender.nearby(ev, LatLon(36.0, 132.5)).isEmpty()) // 동해 먼 바다
+        assertTrue(Recommender.nearby(ev, seoul).all { CostEngine.haversineKm(seoul, it.pos) <= Recommender.CANDIDATE_RADIUS_KM })
     }
 
     @Test fun candidatesWithin20km_ofSeoulGangnamIncheon() {
@@ -72,7 +97,7 @@ class EvSnapshotTest {
             val n = Recommender.nearby(ev, o).size
             assertTrue("후보 없음 $o", n > 0)
         }
-        // 반경 60km 도 전체 선형 스캔으로 충분(1,058곳)
+        // 반경 60km 도 전체 선형 스캔으로 충분(3,103곳)
         assertTrue(Recommender.candidatesFor(ev, seoul, incheon).isNotEmpty())
     }
 

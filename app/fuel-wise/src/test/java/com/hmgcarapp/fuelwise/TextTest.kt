@@ -81,4 +81,10 @@ class TextTest {
         assertEquals(NaviStatus.Failed("경로를 찾지 못했어요"), NaviReducer.onError(pending, "CAUSE_SEARCH_ROUTE"))
         assertEquals(NaviStatus.Failed(NaviText.NO_RESPONSE), NaviReducer.onTimeout(pending))
     }
+
+    @org.junit.Test fun detailEmptyDoesNotRepeatNoCandidateNotice() {
+        org.junit.Assert.assertEquals("후보가 생기면 여기에 상세가 보여요.", com.hmgcarapp.fuelwise.ui.detailEmptyText(true))
+        org.junit.Assert.assertEquals("후보를 선택하세요.", com.hmgcarapp.fuelwise.ui.detailEmptyText(false))
+        org.junit.Assert.assertFalse(com.hmgcarapp.fuelwise.ui.detailEmptyText(true).contains("후보가 없어요"))
+    }
 }

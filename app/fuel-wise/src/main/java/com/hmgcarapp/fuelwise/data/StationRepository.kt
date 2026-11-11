@@ -97,11 +97,12 @@ object SampleJsonParser {
         val root = JSONObject(json)
         val evAssumedDefault = root.optJSONObject("_meta") != null
         val out = mutableListOf<Candidate>()
+        val seen = HashSet<String>()
         fun each(key: String, f: (JSONObject) -> Candidate?) {
             val a = root.optJSONArray(key) ?: return
             for (i in 0 until a.length()) {
                 val c = runCatching { f(a.getJSONObject(i)) }.getOrNull()
-                if (c == null) HmgLog.w("Sample", "$key[$i] 건너뜀(형식/범위 오류)") else if (out.none { it.id == c.id }) out += c
+                if (c == null) HmgLog.w("Sample", "$key[$i] 건너뜀(형식/범위 오류)") else if (seen.add(c.id)) out += c
             }
         }
         if (includeFuel) each("fuel", ::parseFuel)
@@ -120,7 +121,16 @@ object StationData {
         val meta = evSnapshotJson?.let(SampleJsonParser::parseMeta)
         if (ev.isEmpty() || meta == null) return Merged(sample, null)
         val fuel = sample.filter { it.kind == EnergyKind.FUEL }
-        return Merged(fuel + ev.filter { e -> fuel.none { it.id == e.id } }, meta)
+        val fuelIds = fuel.mapTo(HashSet()) { it.id }
+        return Merged(fuel + dedupeEv(ev.filter { it.id !in fuelIds }), meta)
+    }
+
+    /** 이름·좌표(소수 5자리, 약 1m)가 같은 충전소는 사용자에게 같은 곳으로 보이므로 kW 가 큰 쪽 하나만 남긴다(입력 순서 유지). */
+    fun dedupeEv(list: List<Candidate>): List<Candidate> {
+        fun key(c: Candidate) = "${c.name}|${Math.round(c.pos.lat * 1e5)}|${Math.round(c.pos.lon * 1e5)}"
+        val best = HashMap<String, Candidate>()
+        for (c in list) { val k = key(c); val b = best[k]; if (b == null || (c.chargerKw ?: 0.0) > (b.chargerKw ?: 0.0)) best[k] = c }
+        return list.filter { best[key(it)] === it }
     }
 }
 

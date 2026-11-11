@@ -262,7 +262,7 @@ private fun CandidatesMaster(c: AppController, s: UiState, onOpenDetail: () -> U
         }
         if (s.quotes.isEmpty()) item {
             Txt(
-                if (s.candidates.isEmpty()) "표시할 후보가 없어요." else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 안에 후보가 없어요. 번들 데이터는 수도권 일대에만 있어요.",
+                if (s.candidates.isEmpty()) "표시할 후보가 없어요." else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 안에 후보가 없어요. 충전소는 전국 공공데이터 스냅샷이지만, 주유소는 가공 샘플(서울 강남 일대)이라 지역에 따라 후보가 없을 수 있어요.",
                 secondary = true, modifier = Modifier.testTag("empty_candidates"),
             )
         }
@@ -270,6 +270,9 @@ private fun CandidatesMaster(c: AppController, s: UiState, onOpenDetail: () -> U
 }
 
 // ---------------- 상세(우) ----------------
+/** 상세 패널 빈 문구. 후보가 없다는 안내는 목록 쪽에 이미 있으므로 여기서는 반복하지 않는다. */
+internal fun detailEmptyText(noQuotes: Boolean): String = if (noQuotes) "후보가 생기면 여기에 상세가 보여요." else "후보를 선택하세요."
+
 @Composable
 private fun Detail(c: AppController, s: UiState) {
     when (s.p.page) {
@@ -283,7 +286,7 @@ private fun Detail(c: AppController, s: UiState) {
 @Composable
 private fun CandidateDetail(c: AppController, s: UiState) {
     val q = s.selected
-    if (q == null) { PleosPanel(Modifier.fillMaxWidth()) { Txt(if (s.quotes.isEmpty()) "표시할 후보가 없어요." else "후보를 선택하세요.", secondary = true) }; return }
+    if (q == null) { PleosPanel(Modifier.fillMaxWidth()) { Txt(detailEmptyText(s.quotes.isEmpty()), secondary = true) }; return }
     val unit = if (q.candidate.kind == EnergyKind.FUEL) "L" else "kWh"
     PleosPanel(Modifier.fillMaxWidth(), title = q.candidate.name) {
         Txt("${q.candidate.brand} · ${if (q.candidate.kind == EnergyKind.FUEL) "주유소" else "충전소"} · ${if (q.candidate.priceAssumed) "공공데이터 스냅샷(요금은 가정)" else "가공 샘플"}", PleosTheme.typography.labelMedium, secondary = true)
