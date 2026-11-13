@@ -33,7 +33,6 @@ class FixKTests {
         assertEquals(320, SampleJsonParser.parseMeta(snap("", ev("a")))!!.assumedWon)
         assertEquals(320, SampleJsonParser.parseMeta(snap(""","assumedWon":-5""", ev("a")))!!.assumedWon)
         assertEquals(350, SampleJsonParser.parseMeta(snap(""","assumedWon":350""", ev("a")))!!.assumedWon)
-        assertEquals("가정 단가 320원/kWh", DataLabels.assumedUnit(SampleJsonParser.parseMeta(snap(""","assumedWon":0""", ev("a")))))
     }
 
     private fun q(id: String, unit: Double, km: Double, assumed: Boolean = false, base: Boolean = false, net: Long = 0, name: String = id) = Quote(
@@ -67,21 +66,21 @@ class FixKTests {
         assertFalse(StateCodec.decode(old).report.single().assumed)
     }
 
-    @Test fun recordedToast_assumed_hasNoSavingAndSaysNotRealPrice() {
+    @Test fun recordedToast_assumed_hasNoSavingAndNoAssumptionNote() {
         val m = StoreRules.recordedMessage("충전소", 1350, false, assumed = true)
-        assertEquals("기록됨: 충전소 (가정 단가 기준·실제 요금 아님)", m); assertFalse(m.contains("절약"))
-        assertTrue(StoreRules.recordedMessage("충전소", 1350, true, assumed = true).startsWith("기록됨(이번 실행에서만 유지)"))
-        assertEquals("기록됨: 주유소 (추정 절약 1,350원)", StoreRules.recordedMessage("주유소", 1350, false))
+        assertEquals("기록됨: 충전소", m); assertFalse(m.contains("절약")); assertFalse(m.contains("가정")); assertFalse(m.contains("실제 요금"))
+        assertTrue(StoreRules.recordedMessage("충전소", 1350, true, assumed = true).startsWith("기록됨: 충전소"))
+        assertEquals("기록됨: 주유소", StoreRules.recordedMessage("주유소", 1350, false))
     }
 
     @Test fun alertText_assumed_neverClaimsSaving_andBannerFits() {
         for (best in listOf(q("a", 320.0, 2.5, assumed = true, net = 800), q("a", 320.0, 2.5, assumed = true, net = -3), q("a", 320.0, 2.5, assumed = true, base = true))) {
             val v = AlertText.voice("잔량 15%", best, "충전", RoutePlans.ASK_VIA)
-            assertTrue(v, v.contains("요금은 가정 단가예요")); assertFalse(v, v.contains("절약") || v.contains("실질"))
+            assertFalse(v, v.contains("가정 단가") || v.contains("절약") || v.contains("실질"))
             val line = AlertText.line("잔량 15%, 주행가능거리 40km", best)
-            assertTrue(line, line.length <= AlertText.BANNER_MAX && !line.contains("절약"))
+            assertTrue(line, line.length <= AlertText.BANNER_MAX && !line.contains("절약") && !line.contains("가정 단가"))
         }
-        assertEquals("잔량 15% · 충전 a · 가정 단가", AlertText.line("잔량 15%", q("a", 320.0, 2.5, assumed = true, name = "충전 a")))
+        assertEquals("잔량 15% · 충전 a", AlertText.line("잔량 15%", q("a", 320.0, 2.5, assumed = true, name = "충전 a")))
         // 주유소(비가정) 기존 문구 불변
         assertTrue(AlertText.line("잔량 15%", q("f", 1700.0, 2.0, net = 1200)).endsWith("약 1,200원 절약"))
     }

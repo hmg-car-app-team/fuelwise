@@ -169,7 +169,6 @@ class AppController(
         // 복원 안내도 주행 중에는 세팅하지 않는다(설정 화면의 상시 안내는 유지, r7R3-6)
         when {
             // 앱 시작 직후 drive 기본값이 DRIVING 이라 Notify 는 버려진다: 정차 시 한 번 표시한다(r9R3-1). 설정 화면 상시 안내는 별도
-            res.corrupt -> dispatch(AlertEvent.NotifyOrDefer("저장된 데이터가 손상돼 처음 상태로 시작했어요"))
             res.readError -> dispatch(AlertEvent.NotifyOrDefer(StoreRules.HELD_NOTICE))
         }
         recompute()
@@ -179,7 +178,7 @@ class AppController(
     private suspend fun applyLoad(origin: LatLon) {
         val list = loader.load(origin) ?: return
         val meta = repo.evMeta
-        _state.update { it.copy(candidates = list, dataLabel = DataLabels.full(meta), dataShort = DataLabels.short(meta), evMeta = meta) }
+        _state.update { it.copy(candidates = list, dataLabel = DataLabels.full(meta), evMeta = meta) }
         recompute()
     }
 
@@ -221,7 +220,6 @@ class AppController(
         val selected = if (quotes.isEmpty()) p.selectedId else p.selectedId?.takeIf { id -> quotes.any { it.candidate.id == id } } ?: quotes.first().candidate.id
         _state.value = prev.copy(
             p = p.copy(selectedId = selected), kind = r.kind, level = r.level, levelSource = r.source, rangeKm = r.rangeKm, quotes = quotes,
-            modeNote = EnergyResolver.modeNote(mode, p.simMode != null),
         )
         val thr = if (r.kind == EnergyKind.FUEL) s.lowFuelPct else s.lowSocPct
         dispatch(AlertEvent.EnergyUpdated(AlertInput(r.real, r.rangeKm, thr, s.lowRangeKm, loader.loadedOnce, Recommender.best(quotes) != null, quotes.map { it.candidate.id })))
@@ -341,7 +339,7 @@ class AppController(
                 // 그 사이 새로 기록한 항목은 유지. 보류(writable)·손상 보존본 표시는 그대로 둔다(r6R2-5, r6R4-5).
                 updateP { it.copy(report = StateCodec.capReport(StoreRules.restoreAfterFailedClear(before, it.report))) }
                 // 주행 중이면 버리지 않고 보관했다가 정차 시 한 번 표시한다(r7R2-7, r7R5-8)
-                dispatch(AlertEvent.NotifyOrDefer("삭제하지 못했어요. 잠시 후 다시 시도해 주세요"))
+                dispatch(AlertEvent.NotifyOrDefer("삭제하지 못했어요"))
             }
         }
     }

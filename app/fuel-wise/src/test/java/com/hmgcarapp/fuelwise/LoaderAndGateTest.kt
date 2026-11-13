@@ -94,8 +94,8 @@ class LoaderAndGateTest {
         val after = AlertPolicy.evaluate(15, null, 20, 60, false)
         assertFalse(AlertGate.hold(after, true, false, false).trigger)
         // 문구
-        assertEquals("잔량 부족. 근처 주유 후보를 찾지 못했어요.", AlertText.voice(AlertGate.NO_CANDIDATE_REASON, null, "주유", ""))
-        assertEquals("잔량 부족 · 근처 후보를 찾지 못했어요", AlertText.line(AlertGate.NO_CANDIDATE_REASON, null))
+        assertEquals("잔량 부족.", AlertText.voice(AlertGate.NO_CANDIDATE_REASON, null, "주유", ""))
+        assertEquals("잔량 부족", AlertText.line(AlertGate.NO_CANDIDATE_REASON, null))
     }
 
     /** M4: 로더는 '후보 0개 성공'과 '로드 실패'를 구분한다. */

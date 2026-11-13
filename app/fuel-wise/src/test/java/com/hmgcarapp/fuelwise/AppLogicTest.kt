@@ -107,17 +107,17 @@ class AppLogicTest {
         assertTrue(t, t.contains("서초 충전탑이 대략 2.5km 돌아가도 실질 1,350원 절약"))
         assertTrue(t, t.endsWith("경유지로 추가할까요?"))
         assertTrue(AlertText.voice("잔량 15%", quote("A", false, -5), "주유", RoutePlans.ASK_VIA).contains("실질 비용이 가장 낮아요"))
-        assertEquals("잔량 15%. 근처 주유 후보를 찾지 못했어요.", AlertText.voice("잔량 15%", null, "주유", RoutePlans.ASK_START))
+        assertEquals("잔량 15%.", AlertText.voice("잔량 15%", null, "주유", RoutePlans.ASK_START))
     }
 
     @Test fun bannerLine_isAtMost40Chars_andIdleLine() {
         val long = quote("아주아주아주아주아주아주아주아주아주아주 긴 이름의 주유소입니다", false, 100)
         val line = AlertText.line("잔량 15%, 주행가능거리 40km", long)
         assertTrue(line, line.length <= AlertText.BANNER_MAX && line.endsWith("약 100원 절약") && line.contains("…")) // 이름은 줄이고 절약액은 남긴다
-        assertEquals("잔량 15% · 근처 후보를 찾지 못했어요", AlertText.line("잔량 15%", null))
-        assertEquals("잔량 부족 · 근처 후보를 찾지 못했어요", AlertText.line("잔량 부족", null))
-        assertEquals("알림 대기 중 · 주행가능거리 123km", AlertText.idleLine(123.4f))
-        assertEquals("알림 대기 중", AlertText.idleLine(null))
+        assertEquals("잔량 15%", AlertText.line("잔량 15%", null))
+        assertEquals("잔량 부족", AlertText.line("잔량 부족", null))
+        assertEquals("주행가능거리 123km", AlertText.idleLine(123.4f))
+        assertEquals("", AlertText.idleLine(null))
         listOf(VoiceStatus.SPEAKING, VoiceStatus.LISTENING, VoiceStatus.ACCEPTED, VoiceStatus.DECLINED, VoiceStatus.FAILED, VoiceStatus.NO_REPLY, VoiceStatus.NOT_ACCEPTED, VoiceStatus.VOICE_ONLY)
             .forEach { assertTrue(it, it.length <= 6) } // 음성 상태는 짧은 고정 표기(C11: '발화 중'/'듣는 중'; 원문·사유 없음)
     }
@@ -272,13 +272,9 @@ class AppLogicTest {
         assertTrue(r.copy(fuelPercent = 0).fuelSettled); assertTrue(r.copy(evError = "x").evSettled)
     }
 
-    @Test fun effectiveMode_andNote() {
+    @Test fun effectiveMode() {
         assertEquals(EnergyMode.FUEL, EnergyResolver.effectiveMode(EnergyMode.FUEL, EnergyMode.AUTO)) // 시연 모드가 우선
         assertEquals(EnergyMode.EV, EnergyResolver.effectiveMode(null, EnergyMode.EV))                 // 없으면 저장된 설정
-        assertEquals(null, EnergyResolver.modeNote(EnergyMode.AUTO, false))
-        assertEquals("(설정: 내연기관)", EnergyResolver.modeNote(EnergyMode.FUEL, false))
-        assertEquals("(설정: 전기차)", EnergyResolver.modeNote(EnergyMode.EV, false))
-        assertEquals("(시연: 전기차)", EnergyResolver.modeNote(EnergyMode.EV, true))
     }
 
     @Test fun simInput_numbersFromAnyExtraType_andModeField() {

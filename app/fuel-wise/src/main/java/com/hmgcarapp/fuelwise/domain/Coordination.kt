@@ -75,8 +75,7 @@ object VoiceOutcome {
 /** 저장 복구·삭제 규칙(순수). */
 object StoreRules {
     /** 저장 보류 안내(읽기 오류·쓰기 실패 공통; 토스트와 설정 화면이 같은 동사를 쓴다, r8R3-1·r9R4-1). */
-    const val HELD_NOTICE = "저장하지 못해 이번에는 저장하지 않아요"
-    const val HELD_RECOVERY = "앱을 다시 시작하거나 '기록 모두 삭제'를 하면 다시 저장해요."
+    const val HELD_NOTICE = "저장하지 못했어요"
 
     /**
      * 디스크에 쓸 armed(r9R5-1): 알림 음성 흐름이 끝나지 않았으면 true. 저장본 사본에만 적용하고 라이브 상태는 건드리지 않는다
@@ -100,21 +99,15 @@ object StoreRules {
      * 보류가 아니면 기존 문구 그대로.
      */
     fun recordedMessage(name: String, netSaving: Long, saveHeld: Boolean, assumed: Boolean = false): String {
-        val saving = String.format(java.util.Locale.KOREA, "%,d", netSaving)
-        val detail = if (assumed) "가정 단가 기준·실제 요금 아님" else "추정 절약 ${saving}원"
-        return if (saveHeld) "기록됨(이번 실행에서만 유지): $name ($detail)" else "기록됨: $name ($detail)"
+        return "기록됨: $name"
     }
 
     /** 삭제 실패 뒤 메모리 목록 복원(r7R4-1): 삭제 전 목록 + 그 사이 새로 생긴 항목. 저장 전체 상한은 호출부의 capReport 가 건다. */
     fun <T> restoreAfterFailedClear(before: List<T>, nowInMemory: List<T>): List<T> = before + nowInMemory.filter { it !in before }
 
-    /** 설정 상단(세로 화면) 요약 한 줄: 저장 문제가 없으면 null. 자세한 안내는 '저장된 기록' 패널(r7R3-4). */
-    fun summaryLine(saveHeld: Boolean, corruptKept: Boolean): String? = when {
-        saveHeld && corruptKept -> "저장 문제: 읽기·쓰기 오류로 저장을 보류 중이고 손상된 파일이 남아 있어요. 아래 '저장된 기록'을 확인하세요."
-        saveHeld -> "저장 문제: 읽기·쓰기 오류로 이번 세션은 저장하지 않아요. 아래 '저장된 기록'을 확인하세요."
-        corruptKept -> "저장 문제: 손상된 저장 파일이 남아 있어요. 아래 '저장된 기록'을 확인하세요."
-        else -> null
-    }
+    /** 설정 상단 요약 한 줄: 저장 문제가 없으면 null. 내부 오류 상태는 노출하지 않고 다른 앱과 같은 문구만 쓴다. */
+    fun summaryLine(saveHeld: Boolean, corruptKept: Boolean): String? =
+        if (saveHeld || corruptKept) HELD_NOTICE else null
 
     fun clearDescription(reportCount: Int, saveHeld: Boolean, corruptKept: Boolean): String = when {
         // 팝업 설명은 3줄에서 말줄임되므로 '되돌릴 수 없어요'가 잘리지 않게 짧게 유지한다(r6R3-1)
@@ -145,13 +138,6 @@ object MessageRules {
 
 /** 예외 처리 규칙(순수): 취소와 VM 치명 오류(OOM 등)는 삼키지 않고 다시 던진다(r7R5-3/4, r7R2-6b). */
 internal fun mustRethrow(t: Throwable): Boolean = t is kotlinx.coroutines.CancellationException || t is VirtualMachineError
-
-/** 주행 화면 안내(순수): 차량 상태 신호(기어·UX)를 확인하지 못해 주행으로 간주 중이면 그 이유를 한 줄로(r7R3-2). */
-object DriveNotice {
-    const val UNVERIFIED = "차량 상태를 확인하지 못하면 주행 중으로 간주해요"
-    fun of(gear: com.hmgcarapp.core.drive.Gear, uxRestricted: Boolean?): String? =
-        if (gear == com.hmgcarapp.core.drive.Gear.UNKNOWN && uxRestricted == null) UNVERIFIED else null
-}
 
 /** 수집 본문의 예외 처리(순수): 취소·VirtualMachineError 는 재던지고, 그 외 Throwable 은 [onError] 로 넘긴다(r6R5-9). */
 internal inline fun safelyCatching(onError: (Throwable) -> Unit, block: () -> Unit) {

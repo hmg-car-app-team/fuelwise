@@ -32,17 +32,11 @@ data class EvMeta(val source: String, val license: String, val collectedAt: Stri
 /** 데이터 표기 문구(화면·정보 영역 공용). 실시간·과장 표현을 쓰지 않는다. */
 object DataLabels {
     const val FUEL_LABEL = "유가: 가공 샘플"
-    const val ATTRIBUTION = "충전소 정보: 한국환경공단 『전기자동차 충전소 정보』(공공데이터포털 data.go.kr, 공공누리 제1유형). 가공·편집됨, 실시간 정보 아님. 유가는 가공 샘플이며 오피넷 등 실제 유가 데이터가 아님."
+    const val ATTRIBUTION = "충전소 정보: 한국환경공단 『전기자동차 충전소 정보』(공공데이터포털 data.go.kr, 공공누리 제1유형). 가공·편집됨, 실시간 정보 아님."
     fun evSnapshot(m: EvMeta) = "충전소: 공공데이터 스냅샷(한국환경공단 · 공공누리 제1유형 · 기준일 ${m.collectedAt}) · 요금은 가정 단가(원본에 가격 정보 없음) · 실시간 사용 가능 여부 아님"
     /** 전체 라벨. 충전소가 실데이터면 충전소/유가를 분리해, 아니면 기존 '가공 샘플'. */
     fun full(m: EvMeta?) = if (m == null) StationRepositories.DATA_LABEL else evSnapshot(m) + " · " + FUEL_LABEL
-    /** 헤더용 짧은 라벨. */
-    fun short(m: EvMeta?) = if (m == null) StationRepositories.DATA_LABEL else "충전소: 공공데이터 스냅샷 · $FUEL_LABEL"
-    fun assumedUnit(m: EvMeta?, won: Int? = null) = "가정 단가 ${won ?: m?.assumedWon ?: DEFAULT_ASSUMED_WON}원/kWh"
     const val DEFAULT_ASSUMED_WON = 320
-    /** 가정 단가 후보(요금 비교 불가)에 붙이는 고정 문구. */
-    const val ASSUMED_NO_COMPARE = "가정 단가라 요금 비교는 할 수 없어요 · 우회/대기 기준 추천"
-    const val ASSUMED_REPORT_NOTE = "충전 금액은 가정 단가 기준(실제 요금 아님)"
 }
 
 /**

@@ -56,15 +56,19 @@ object NaviReducer {
 }
 
 object NaviText {
-    const val NOT_CONNECTED = "내비 서비스에 연결되지 않았어요"
-    const val NO_RESPONSE = "응답이 없어요. 내비가 동작 중인지 확인해 주세요"
+    const val NOT_CONNECTED = "요청에 실패했어요"
+    /** 무응답은 사용자 문구가 없다(빈 문자열 = 표시·발화 안 함). 확정 실패만 [REQUEST_FAILED]/[NOT_CONNECTED]. */
+    const val NO_RESPONSE = ""
     const val REQUEST_FAILED = "요청에 실패했어요"
     const val ROUTE_STARTED = "경로 안내를 시작했어요"
     const val WAYPOINT_ADDED = "경유지를 추가했어요"
     const val PENDING_ROUTE = "경로 요청 중"
     const val PENDING_VIA = "경유지 포함 경로 요청 중"
     const val PENDING_WAYPOINT = "경유지 추가 요청 중"
-    const val BUSY = "이전 요청을 처리 중이에요"
+    const val BUSY = "요청에 실패했어요"
+
+    /** 결과를 받지 못한 무응답(시간 초과·결과 없음)인지. 내비가 실제로 안내를 시작했을 수 있어 실패로 표시하지 않는다. */
+    fun isNoResponse(result: NaviStatus?): Boolean = result == null || (result is NaviStatus.Failed && result.reason.isBlank())
 
     /** 음성 수락 뒤 결과 확인 발화(짧게). 결과를 못 받았으면(null) 응답 없음. */
     fun spoken(result: NaviStatus?): String = when (result) {
@@ -73,15 +77,9 @@ object NaviText {
         else -> NO_RESPONSE
     }
 
-    /** SDK 오류 코드 이름 -> 한국어. 원시 코드(CAUSE_*)를 사용자에게 보이지 않는다. */
-    fun errorMessage(codeName: String): String = when (codeName) {
-        "CAUSE_SEARCH_ROUTE" -> "경로를 찾지 못했어요"
-        "CAUSE_SEARCH_ROUTE_OVER_DISTANCE" -> "경로가 너무 멀어요"
-        "CAUSE_SEARCH_ROUTE_TOO_SHORT_DISTANCE" -> "목적지가 너무 가까워요"
-        "CAUSE_LOW_BATTERY" -> "배터리가 부족해 경로를 만들 수 없어요"
-        "CAUSE_SEARCH_TRIP" -> "여정을 찾지 못했어요"
-        else -> "경로 요청에 실패했어요"
-    }
+    /** SDK 오류 코드 이름 -> 한국어. 원인별 사유는 보여 주지 않고 한 문장으로 통일한다(원시 코드는 로그로만). */
+    @Suppress("UNUSED_PARAMETER")
+    fun errorMessage(codeName: String): String = REQUEST_FAILED
 }
 
 /** 내비 연결 상수와 짧은 표시 단어. 연결 재생성 판단은 core `ManagedConnection` 이 한다. */
@@ -103,6 +101,6 @@ object NaviConnectRules {
         NaviStatus.Idle -> null
         is NaviStatus.Pending -> "요청 중"
         is NaviStatus.Success -> "요청 완료"
-        is NaviStatus.Failed -> "요청 실패"
+        is NaviStatus.Failed -> if (st.reason.isBlank()) "결과 미확인" else "요청 실패"
     }
 }

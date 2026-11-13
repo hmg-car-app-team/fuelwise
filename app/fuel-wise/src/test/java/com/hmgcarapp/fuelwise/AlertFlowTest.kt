@@ -64,7 +64,7 @@ class AlertFlowTest {
         assertTrue(fx.contains(AlertEffect.SetArmed(false)))
         assertFalse("armed 소진은 발화 시점", h.s.armed)
         h.send(AlertEvent.AlertPlanned(h.s.inFlightId!!, "잔량 15%", NONE_PLAN, "주유소", quote(), true))
-        assertFalse(h.s.banner!!.message.contains(AlertText.LOCATION_NOTE))
+        assertFalse(h.s.banner!!.message.contains("기본 위치"))
         assertTrue(h.all.any { it is AlertEffect.Speak })
     }
 
@@ -75,7 +75,8 @@ class AlertFlowTest {
         val fx = h.send(low())
         assertEquals(1, planFx(fx).size)
         h.send(AlertEvent.AlertPlanned(h.s.inFlightId!!, "잔량 15%", NONE_PLAN, "주유소", quote(), true))
-        assertTrue("위치 미확인 문구", h.s.banner!!.message.contains(AlertText.LOCATION_NOTE))
+        assertFalse("위치 미확인 문구는 더 이상 붙이지 않는다", h.s.banner!!.message.contains("기본 위치"))
+        assertTrue("알림 자체는 나간다", h.s.banner != null)
         assertFalse(h.s.armed)
     }
 

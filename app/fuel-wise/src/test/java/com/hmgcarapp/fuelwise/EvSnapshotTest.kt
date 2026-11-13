@@ -133,9 +133,10 @@ class EvSnapshotTest {
             DataLabels.full(m),
         )
         assertEquals("가공 샘플", DataLabels.full(null))
-        assertEquals("가정 단가 320원/kWh", DataLabels.assumedUnit(m))
+        assertEquals(320, m!!.assumedWon)
         assertFalse(DataLabels.full(m).contains("실시간 데이터"))
         assertTrue(DataLabels.ATTRIBUTION.contains("한국환경공단") && DataLabels.ATTRIBUTION.contains("공공누리 제1유형"))
+        assertFalse(DataLabels.ATTRIBUTION.contains("가공 샘플")) // 유가 문구는 출처 표기에서 제거(상수는 NOTICE 연계용 유지, 화면 미노출)
         assertTrue(CostEngine.haversineKm(seoul, gangnam) > 0)
     }
 }

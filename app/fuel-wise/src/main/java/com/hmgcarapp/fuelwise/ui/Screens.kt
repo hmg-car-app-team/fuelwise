@@ -1,6 +1,5 @@
 package com.hmgcarapp.fuelwise.ui
 
-import com.hmgcarapp.fuelwise.vehicle.SignalStatusText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,15 +25,14 @@ import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.delay
 import com.hmgcarapp.core.drive.DriveState
 import com.hmgcarapp.core.ui.rememberDriveSnapshot
-import com.hmgcarapp.fuelwise.data.DataLabels
 import com.hmgcarapp.fuelwise.app.AppController
 import com.hmgcarapp.fuelwise.app.Page
 import com.hmgcarapp.fuelwise.app.UiState
 import com.hmgcarapp.fuelwise.domain.AlertText
-import com.hmgcarapp.fuelwise.domain.DetourText
 import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.ReportLogic
 import com.hmgcarapp.fuelwise.domain.Recommender
+import com.hmgcarapp.fuelwise.domain.VoiceStatus
 import com.hmgcarapp.fuelwise.domain.EnergyMode
 import com.hmgcarapp.fuelwise.domain.FuelGrade
 import com.hmgcarapp.fuelwise.domain.Presets
@@ -59,7 +57,6 @@ import com.hmgcarapp.pleos.designsystem.theme.PleosTheme
 import com.hmgcarapp.pleos.designsystem.theme.PleosWindowMode
 import com.hmgcarapp.fuelwise.navi.NaviConnectRules
 import com.hmgcarapp.fuelwise.domain.NaviLineRules
-import com.hmgcarapp.fuelwise.domain.DriveNotice
 import com.hmgcarapp.fuelwise.navi.NaviStatus
 import com.hmgcarapp.fuelwise.domain.StoreRules
 import com.hmgcarapp.fuelwise.navi.RoutePlans
@@ -104,7 +101,7 @@ fun FuelWiseApp(c: AppController) {
     PleosScaffold(
         title = "알뜰주유",
         // 판정 근거(snap.reason)·내부 용어는 debuggable 에서만 노출
-        subtitle = "${s.dataShort} · ${if (driving) "주행 중" else "정차 중"}" + if (c.debuggable) " · ${snap.reason}" else "",
+        subtitle = (if (driving) "주행 중" else "정차 중") + if (c.debuggable) " · ${snap.reason}" else "",
         toastState = toast,
         actions = {
             // 시연 전용(debuggable): 실신호 / 주행 강제. '정차' override 는 core 규칙상 효과가 없어 제거(정차 화면은 실신호 P단·속도 0 으로 확인)
@@ -120,7 +117,7 @@ fun FuelWiseApp(c: AppController) {
         supportingPaneWidth = paneWidth,
     ) { mode ->
         when {
-            driving -> DrivingView(c, s, DriveNotice.of(snap.inputs.gear, snap.inputs.uxRequiresDistractionOptimization))
+            driving -> DrivingView(c, s)
             s.loading -> PleosPanel(Modifier.fillMaxWidth()) { Txt("불러오는 중…", secondary = true, modifier = Modifier.testTag("loading")) }
             mode == PleosWindowMode.Landscape -> Detail(c, s)
             s.p.page == Page.CANDIDATES && detailOpen -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(PleosSpacing.m)) {
@@ -145,19 +142,20 @@ private fun ReplacePopup(c: AppController, rc: com.hmgcarapp.fuelwise.domain.Rep
 
 // ---------------- 주행 중: 한 줄 배너 + 음성 상태 한 단어 ----------------
 @Composable
-private fun DrivingView(c: AppController, s: UiState, notice: String? = null) {
+private fun DrivingView(c: AppController, s: UiState) {
     val navi by c.navi.status.collectAsState()
+    val b = s.banner
+    val idle = if (b == null) AlertText.idleLine(s.rangeKm) else ""
     Column(Modifier.fillMaxSize().testTag("driving_view")) {
-        PleosPanel(Modifier.fillMaxWidth()) {
-            val b = s.banner
+        // 보여 줄 내용이 없으면 빈 카드를 그리지 않는다
+        if (drivingHasContent(b != null, idle)) PleosPanel(Modifier.fillMaxWidth()) {
             if (b != null) {
                 Txt(b.line, PleosTheme.typography.bodyLarge, modifier = Modifier.testTag("banner_msg"))
                 // 주행 중 상태 줄은 운전자가 읽는 유일한 상태라 본문 크기·기본 색으로 표시한다(고정 단어라 길이 제한에서 잘리지 않음)
-                Txt(drivingStatusLine(b.voiceStatus, navi), PleosTheme.typography.bodyMedium, modifier = Modifier.testTag("banner_voice"))
+                val status = drivingStatusLine(b.voiceStatus, navi)
+                if (status.isNotEmpty()) Txt(status, PleosTheme.typography.bodyMedium, modifier = Modifier.testTag("banner_voice"))
             } else {
-                Txt(AlertText.idleLine(s.rangeKm), PleosTheme.typography.bodyLarge, secondary = true, modifier = Modifier.testTag("driving_idle"))
-                // 기어·UX 신호를 모두 확인하지 못하면 항상 주행으로 간주된다: 이유를 한 줄로 알린다(r7R3-2)
-                notice?.let { Txt(it, PleosTheme.typography.bodyMedium, secondary = true, modifier = Modifier.testTag("driving_notice")) }
+                Txt(idle, PleosTheme.typography.bodyLarge, secondary = true, modifier = Modifier.testTag("driving_idle"))
             }
         }
     }
@@ -165,10 +163,9 @@ private fun DrivingView(c: AppController, s: UiState, notice: String? = null) {
 
 @Composable
 private fun EnergyCard(s: UiState) {
-    val label = if (s.kind == EnergyKind.FUEL) "연료" else "배터리(SoC)"
-    PleosPanel(Modifier.fillMaxWidth(), title = "$label ${s.level}%" + (s.modeNote?.let { " $it" } ?: "")) {
-        Txt("출처: ${s.levelSource}", secondary = true, modifier = Modifier.testTag("level_source"))
-        Txt("주행가능거리: ${s.rangeKm?.let { String.format(Locale.KOREA, "%.0f km", it) } ?: "정보 없음"}", secondary = true)
+    val label = if (s.kind == EnergyKind.FUEL) "연료" else "배터리"
+    PleosPanel(Modifier.fillMaxWidth(), title = "$label ${s.level}%") {
+        s.rangeKm?.let { Txt("주행가능거리: ${String.format(Locale.KOREA, "%.0f km", it)}", secondary = true) }
     }
 }
 
@@ -176,9 +173,8 @@ private fun guideLabel(s: UiState, isEv: Boolean) = RoutePlans.buttonLabel(Route
 
 @Composable
 private fun BannerCard(c: AppController, s: UiState, b: com.hmgcarapp.fuelwise.domain.Banner) {
-    PleosPanel(Modifier.fillMaxWidth(), title = "잔량 알림") {
+    PleosPanel(Modifier.fillMaxWidth()) {
         Txt(b.message, modifier = Modifier.testTag("banner_msg"))
-        Txt(voiceLabel(b.voiceStatus), PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("banner_voice"))
         NaviLine(c)
         if (s.drive == DriveState.PARKED) {
             Row(horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m)) {
@@ -198,8 +194,7 @@ private fun NaviLine(c: AppController) {
         is NaviStatus.Success -> PleosStatusBadge(v.what, PleosStatus.Positive)
         is NaviStatus.Failed -> {
             // 배지는 고정 짧은 단어, 긴 사유는 본문 텍스트로(배지에서 잘리지 않게)
-            PleosStatusBadge(NaviConnectRules.shortWord(v) ?: "요청 실패", PleosStatus.Negative)
-            Txt(v.reason, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("navi_reason"))
+            PleosStatusBadge(NaviConnectRules.shortWord(v) ?: "요청 실패", if (v.reason.isBlank()) PleosStatus.Neutral else PleosStatus.Negative)
         }
     }
 }
@@ -217,7 +212,7 @@ private fun Master(c: AppController, s: UiState, landscape: Boolean, onOpenDetai
             Page.CANDIDATES -> CandidatesMaster(c, s, onOpenDetail)
             Page.REPORT -> Scroll { ReportMaster(s); if (!landscape) ReportDetail(c, s) }
             Page.CARDS -> Scroll { CardsMaster(c, s); if (!landscape) CardsDetail(s) }
-            Page.SETTINGS -> Scroll { SettingsMaster(c, s, summary = !landscape); if (!landscape) SettingsDetail(c, s) }
+            Page.SETTINGS -> Scroll { SettingsMaster(c, s); if (!landscape) SettingsDetail(c, s) }
         }
     }
 }
@@ -234,35 +229,24 @@ private fun CandidatesMaster(c: AppController, s: UiState, onOpenDetail: () -> U
         item {
             PleosSegmentedTabs(SortKey.entries.map { it.labelFor(s.quotes.any { q -> q.candidate.priceAssumed }) }, s.settings.sort.ordinal, { c.setSort(SortKey.entries[it]) }, Modifier.fillMaxWidth())
         }
-        item {
-            val d = s.destination
-            Txt(
-                if (d != null) "경로 부근 추천: 현재 위치 → ${d.name} 방향 · ${DetourText.ROUTE_ESTIMATE}"
-                else if (s.routeDest != null) "내비 안내 경로 부근 · ${DetourText.ROUTE_ESTIMATE}"
-                else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 후보 · ${DetourText.ROUNDTRIP_ESTIMATE}",
-                PleosTheme.typography.labelMedium, secondary = true,
-            )
-            Txt(s.dataLabel, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("data_label"))
-        }
         items(s.quotes, key = { it.candidate.id }) { q ->
             val isBest = q.candidate.id == s.best?.candidate?.id
             PleosListItem(
                 title = (if (isBest) "추천 · " else "") + q.candidate.name,
                 description = if (q.candidate.kind == EnergyKind.FUEL) "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/L · 우회 ${String.format(Locale.KOREA, "%.1f", q.detourKm)}km · 총 ${won(q.totalCost)}"
-                else if (q.candidate.priceAssumed) "${DataLabels.assumedUnit(s.evMeta, q.listUnitPrice.toInt())}" + (if (q.unitPrice != q.listUnitPrice) " → 할인 적용 ${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/kWh" else "") + " · ${q.candidate.chargerKw?.toInt()}kW · 대기 0분 가정 · 총 ${won(q.totalCost)}(가정 단가 기준)"
+                else if (q.candidate.priceAssumed) "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/kWh · ${q.candidate.chargerKw?.toInt()}kW · 총 ${won(q.totalCost)}"
                 else "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/kWh · ${q.candidate.chargerKw?.toInt()}kW · 대기 ${q.candidate.waitMin}분 · 총 ${won(q.totalCost)}",
                 selected = q.candidate.id == s.p.selectedId,
                 onClick = { c.select(q.candidate.id); onOpenDetail() },
                 trailing = {
                     if (q.isBaseline) PleosStatusBadge("기준", PleosStatus.Neutral)
-                    else if (q.candidate.priceAssumed || !q.savingComparable) PleosStatusBadge("요금 비교 불가", PleosStatus.Neutral)
-                    else PleosStatusBadge(signedWon(q.netSaving), if (q.netSaving > 0) PleosStatus.Positive else PleosStatus.Negative)
+                    else if (!q.candidate.priceAssumed && q.savingComparable) PleosStatusBadge(signedWon(q.netSaving), if (q.netSaving > 0) PleosStatus.Positive else PleosStatus.Negative)
                 },
             )
         }
         if (s.quotes.isEmpty()) item {
             Txt(
-                if (s.candidates.isEmpty()) "표시할 후보가 없어요." else "주변 ${Recommender.CANDIDATE_RADIUS_KM.toInt()}km 안에 후보가 없어요. 충전소는 전국 공공데이터 스냅샷이지만, 주유소는 가공 샘플(서울 강남 일대)이라 지역에 따라 후보가 없을 수 있어요.",
+                "후보가 없어요.",
                 secondary = true, modifier = Modifier.testTag("empty_candidates"),
             )
         }
@@ -271,7 +255,7 @@ private fun CandidatesMaster(c: AppController, s: UiState, onOpenDetail: () -> U
 
 // ---------------- 상세(우) ----------------
 /** 상세 패널 빈 문구. 후보가 없다는 안내는 목록 쪽에 이미 있으므로 여기서는 반복하지 않는다. */
-internal fun detailEmptyText(noQuotes: Boolean): String = if (noQuotes) "후보가 생기면 여기에 상세가 보여요." else "후보를 선택하세요."
+internal fun detailEmptyText(noQuotes: Boolean): String = "후보를 선택하세요."
 
 @Composable
 private fun Detail(c: AppController, s: UiState) {
@@ -289,24 +273,13 @@ private fun CandidateDetail(c: AppController, s: UiState) {
     if (q == null) { PleosPanel(Modifier.fillMaxWidth()) { Txt(detailEmptyText(s.quotes.isEmpty()), secondary = true) }; return }
     val unit = if (q.candidate.kind == EnergyKind.FUEL) "L" else "kWh"
     PleosPanel(Modifier.fillMaxWidth(), title = q.candidate.name) {
-        Txt("${q.candidate.brand} · ${if (q.candidate.kind == EnergyKind.FUEL) "주유소" else "충전소"} · ${if (q.candidate.priceAssumed) "공공데이터 스냅샷(요금은 가정)" else "가공 샘플"}", PleosTheme.typography.labelMedium, secondary = true)
-        if (q.candidate.priceAssumed) Txt("${DataLabels.assumedUnit(s.evMeta)}: 원본에 가격 정보가 없어 가정한 값이라 실제 요금과 다를 수 있어요. 대기 0분도 가정이며 실시간 사용 가능 여부가 아니에요.", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("d_assumed"))
-        KV(if (q.candidate.priceAssumed) "가정 단가" else "표시 단가", "${String.format(Locale.KOREA, "%,.0f", q.listUnitPrice)}원/$unit")
-        KV("할인 적용 단가", "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/$unit" + (q.discountName?.let { " ($it)" } ?: ""), tag = "d_unit")
-        KV("주입량", "${String.format(Locale.KOREA, "%.1f", q.quantity)}$unit")
-        KV("주입 비용", won(q.fillCost), tag = "d_fill")
-        KV(DetourText.label(s.evalDest != null), "${String.format(Locale.KOREA, "%.1f", q.detourKm)}km")
-        KV("우회 ${if (q.candidate.kind == EnergyKind.FUEL) "연료비" else "전력비"}", won(q.detourEnergyCost), tag = "d_detour")
-        KV(if (q.candidate.priceAssumed) "총비용(가정 단가 기준)" else "총비용", won(q.totalCost), tag = "d_total")
-        if (q.candidate.kind == EnergyKind.EV) {
-            KV("충전 출력", "${q.candidate.chargerKw?.toInt()}kW (차량 한도 ${s.settings.evMaxKw}kW)")
-            KV("예상 소요", "${String.format(Locale.KOREA, "%.0f", q.extraMin + q.chargeMin)}분 (이동+대기 ${String.format(Locale.KOREA, "%.0f", q.extraMin)} + 충전 ${String.format(Locale.KOREA, "%.0f", q.chargeMin)})")
-            KV("시간 환산 비용", won(q.timeCost))
-        }
+        Txt("${q.candidate.brand} · ${if (q.candidate.kind == EnergyKind.FUEL) "주유소" else "충전소"}", PleosTheme.typography.labelMedium, secondary = true)
+        KV("표시 단가", "${String.format(Locale.KOREA, "%,.0f", q.listUnitPrice)}원/$unit")
+        if (q.discountName != null) KV("할인 적용 단가", "${String.format(Locale.KOREA, "%,.0f", q.unitPrice)}원/$unit (${q.discountName})", tag = "d_unit")
+        KV("우회 거리", "${String.format(Locale.KOREA, "%.1f", q.detourKm)}km")
+        KV("총비용", won(q.totalCost), tag = "d_total")
         if (q.isBaseline) PleosStatusBadge("기준 후보(우회 최소)", PleosStatus.Neutral)
-        else if (q.candidate.priceAssumed || !q.savingComparable) Txt(DataLabels.ASSUMED_NO_COMPARE, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("d_no_compare"))
-        else {
-            KV("가격만 비교한 절약", signedWon(q.grossSaving))
+        else if (!q.candidate.priceAssumed && q.savingComparable) {
             PleosStatusBadge("실질 절약 ${signedWon(q.netSaving)}", if (q.netSaving > 0) PleosStatus.Positive else PleosStatus.Negative, Modifier.testTag("d_net"))
         }
         if (NaviLineRules.showInDetail(s.banner != null)) NaviLine(c) // 배너가 있으면 배너 쪽에서만 표시
@@ -325,15 +298,9 @@ private fun ReportMaster(s: UiState) {
     LaunchedEffect(Unit) { while (true) { delay(60_000); now = System.currentTimeMillis() } }
     val key = ReportLogic.monthKey(now)
     val items = s.p.report
-    val sampleCount = items.count { it.sample }
     PleosPanel(Modifier.fillMaxWidth(), title = "이번 달($key) 추정 절약") {
         Txt(won(ReportLogic.monthSaved(items, key)), PleosTheme.typography.headlineSmall, modifier = Modifier.testTag("month_saved"))
         KV("기록 횟수", "${ReportLogic.monthCount(items, key)}회")
-        val assumedN = ReportLogic.monthAssumedCount(items, key)
-        KV(if (assumedN > 0) "총 지출(가정 단가 포함)" else "총 지출", won(ReportLogic.monthSpent(items, key)))
-        KV("누적(전체) 추정 절약", won(ReportLogic.totalSaved(items)))
-        if (assumedN > 0) Txt("충전소 ${assumedN}건: ${DataLabels.ASSUMED_REPORT_NOTE}. 이 항목의 절약은 합계에 넣지 않았어요.", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("report_assumed_note"))
-        if (sampleCount > 0) Txt("샘플 기록 ${sampleCount}건은 합계에서 제외했어요.", PleosTheme.typography.labelMedium, secondary = true)
     }
 }
 
@@ -341,26 +308,25 @@ private fun ReportMaster(s: UiState) {
 private fun ReportDetail(c: AppController, s: UiState) {
     val fmt = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA)
     PleosPanel(Modifier.fillMaxWidth(), title = "기록") {
-        if (s.p.report.isEmpty()) Txt("아직 기록이 없어요. 후보 상세에서 '완료 기록'을 눌러 추가하세요.", secondary = true)
-        s.p.report.sortedByDescending { it.ts }.forEach { e ->
+                s.p.report.sortedByDescending { it.ts }.forEach { e ->
             PleosListItem(
-                title = e.name + if (e.sample) " [샘플]" else "",
-                description = "${fmt.format(Date(e.ts))} · ${String.format(Locale.KOREA, "%.1f", e.quantity)}${if (e.kind == EnergyKind.FUEL) "L" else "kWh"} · 지출 ${won(e.spent)}" + if (e.assumed) " (가정 단가 기준·실제 요금 아님)" else "",
-                trailing = { if (e.assumed) PleosStatusBadge("절약 산정 안 함", PleosStatus.Neutral) else PleosStatusBadge("추정 " + signedWon(e.saved), if (e.saved > 0) PleosStatus.Positive else PleosStatus.Neutral) },
+                title = e.name,
+                description = "${fmt.format(Date(e.ts))} · ${String.format(Locale.KOREA, "%.1f", e.quantity)}${if (e.kind == EnergyKind.FUEL) "L" else "kWh"} · 지출 ${won(e.spent)}",
+                trailing = { if (!e.assumed) PleosStatusBadge("추정 " + signedWon(e.saved), if (e.saved > 0) PleosStatus.Positive else PleosStatus.Neutral) },
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m)) {
-            if (c.debuggable) PleosButton("시연용 샘플 3건 추가", onClick = { c.addSampleReport() }, hierarchy = PleosButtonHierarchy.Secondary)
+            if (c.debuggable) PleosButton("샘플 추가", onClick = { c.addSampleReport() }, hierarchy = PleosButtonHierarchy.Secondary)
             ClearReportButton(c, s)
         }
     }
 }
 
-/** 리포트·설정 공통: 같은 문구, PleosPopup 확인 뒤에만 삭제(삭제 직후 컨트롤러가 즉시 저장). */
+/** 리포트 화면: 같은 문구, PleosPopup 확인 뒤에만 삭제(삭제 직후 컨트롤러가 즉시 저장). */
 @Composable
-private fun ClearReportButton(c: AppController, s: UiState, modifier: Modifier = Modifier) {
+private fun ClearReportButton(c: AppController, s: UiState) {
     var ask by remember { mutableStateOf(false) }
-    PleosButton("기록 모두 삭제", onClick = { ask = true }, hierarchy = PleosButtonHierarchy.Secondary, enabled = StoreRules.clearEnabled(s.p.report.size, s.saveHeld, s.corruptKept, s.loading), modifier = modifier)
+    PleosButton("기록 모두 삭제", onClick = { ask = true }, hierarchy = PleosButtonHierarchy.Secondary, enabled = StoreRules.clearEnabled(s.p.report.size, s.saveHeld, s.corruptKept, s.loading))
     if (ask) PleosPopup(
         title = "기록을 모두 삭제할까요?",
         description = StoreRules.clearDescription(s.p.report.size, s.saveHeld, s.corruptKept),
@@ -372,11 +338,10 @@ private fun ClearReportButton(c: AppController, s: UiState, modifier: Modifier =
 // ---------------- 할인 ----------------
 @Composable
 private fun CardsMaster(c: AppController, s: UiState) {
-    PleosPanel(Modifier.fillMaxWidth(), title = "할인 카드·멤버십 (가공 샘플)") {
+    PleosPanel(Modifier.fillMaxWidth(), title = "할인 카드·멤버십") {
         Presets.discounts.forEach { d ->
             PleosSwitch(checked = d.id in s.p.cards, onCheckedChange = { c.toggleCard(d.id) }, label = d.name, modifier = Modifier.testTag("card_${d.id}"))
         }
-        Txt("동시에 여러 개가 해당되면 가장 큰 할인 1개만 적용해요.", PleosTheme.typography.labelMedium, secondary = true)
     }
 }
 
@@ -390,6 +355,9 @@ private fun CardsDetail(s: UiState) {
 }
 
 // ---------------- 설정 ----------------
+/** 연비·전비·탱크·배터리 용량 외의 차량·알림 세부 수치는 화면에서만 숨긴다(값·기본값·로직은 유지). */
+private const val SHOW_ADVANCED_SETTINGS = false
+
 @Composable
 private fun NumRow(label: String, value: String, onDec: () -> Unit, onInc: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -399,10 +367,9 @@ private fun NumRow(label: String, value: String, onDec: () -> Unit, onInc: () ->
 }
 
 @Composable
-private fun SettingsMaster(c: AppController, s: UiState, summary: Boolean = false) {
+private fun SettingsMaster(c: AppController, s: UiState) {
     val st = s.settings
     // 세로 화면: 저장 문제가 있으면 설정 맨 위에 한 줄 요약(자세한 안내는 아래 '저장된 기록' 패널, r7R3-4)
-    if (summary) StoreRules.summaryLine(s.saveHeld, s.corruptKept)?.let { Txt(it, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("storage_summary")) }
     PleosPanel(Modifier.fillMaxWidth(), title = "차량·연료") {
         Txt("에너지 종류", secondary = true)
         PleosSegmentedTabs(EnergyMode.entries.map { it.label }, st.energyMode.ordinal, { i -> c.editSettings { it.copy(energyMode = EnergyMode.entries[i]) } }, Modifier.fillMaxWidth().testTag("set_mode"))
@@ -412,19 +379,18 @@ private fun SettingsMaster(c: AppController, s: UiState, summary: Boolean = fals
         NumRow("연비", "${String.format(Locale.KOREA, "%.1f", st.kmPerL)}km/L", { c.editSettings { it.copy(kmPerL = (it.kmPerL - 0.5).coerceAtLeast(3.0)) } }, { c.editSettings { it.copy(kmPerL = (it.kmPerL + 0.5).coerceAtMost(30.0)) } })
         NumRow("배터리 용량", "${String.format(Locale.KOREA, "%.0f", st.batteryKwh)}kWh", { c.editSettings { it.copy(batteryKwh = (it.batteryKwh - 5).coerceAtLeast(20.0)) } }, { c.editSettings { it.copy(batteryKwh = (it.batteryKwh + 5).coerceAtMost(130.0)) } })
         NumRow("전비", "${String.format(Locale.KOREA, "%.1f", st.kmPerKwh)}km/kWh", { c.editSettings { it.copy(kmPerKwh = (it.kmPerKwh - 0.5).coerceAtLeast(2.0)) } }, { c.editSettings { it.copy(kmPerKwh = (it.kmPerKwh + 0.5).coerceAtMost(10.0)) } })
-        NumRow("차량 최대 충전 출력", "${st.evMaxKw}kW", { c.editSettings { it.copy(evMaxKw = (it.evMaxKw - 25).coerceAtLeast(25)) } }, { c.editSettings { it.copy(evMaxKw = (it.evMaxKw + 25).coerceAtMost(350)) } })
-        NumRow("충전 목표", "${st.chargeTargetPct}%", { c.editSettings { it.copy(chargeTargetPct = (it.chargeTargetPct - 5).coerceAtLeast(50)) } }, { c.editSettings { it.copy(chargeTargetPct = (it.chargeTargetPct + 5).coerceAtMost(100)) } })
-        NumRow("EV 시간 환산", "${st.evTimeValueWonPerMin}원/분", { c.editSettings { it.copy(evTimeValueWonPerMin = (it.evTimeValueWonPerMin - 10).coerceAtLeast(0)) } }, { c.editSettings { it.copy(evTimeValueWonPerMin = (it.evTimeValueWonPerMin + 10).coerceAtMost(200)) } })
+        if (SHOW_ADVANCED_SETTINGS) NumRow("차량 최대 충전 출력", "${st.evMaxKw}kW", { c.editSettings { it.copy(evMaxKw = (it.evMaxKw - 25).coerceAtLeast(25)) } }, { c.editSettings { it.copy(evMaxKw = (it.evMaxKw + 25).coerceAtMost(350)) } })
+        if (SHOW_ADVANCED_SETTINGS) NumRow("충전 목표", "${st.chargeTargetPct}%", { c.editSettings { it.copy(chargeTargetPct = (it.chargeTargetPct - 5).coerceAtLeast(50)) } }, { c.editSettings { it.copy(chargeTargetPct = (it.chargeTargetPct + 5).coerceAtMost(100)) } })
+        if (SHOW_ADVANCED_SETTINGS) NumRow("EV 시간 환산", "${st.evTimeValueWonPerMin}원/분", { c.editSettings { it.copy(evTimeValueWonPerMin = (it.evTimeValueWonPerMin - 10).coerceAtLeast(0)) } }, { c.editSettings { it.copy(evTimeValueWonPerMin = (it.evTimeValueWonPerMin + 10).coerceAtMost(200)) } })
     }
     PleosPanel(Modifier.fillMaxWidth(), title = "알림") {
         NumRow("연료 알림 기준", "${st.lowFuelPct}%", { c.editSettings { it.copy(lowFuelPct = (it.lowFuelPct - 5).coerceAtLeast(5)) } }, { c.editSettings { it.copy(lowFuelPct = (it.lowFuelPct + 5).coerceAtMost(50)) } })
         NumRow("배터리 알림 기준", "${st.lowSocPct}%", { c.editSettings { it.copy(lowSocPct = (it.lowSocPct - 5).coerceAtLeast(5)) } }, { c.editSettings { it.copy(lowSocPct = (it.lowSocPct + 5).coerceAtMost(50)) } })
-        NumRow("주행가능거리 기준", "${st.lowRangeKm}km", { c.editSettings { it.copy(lowRangeKm = (it.lowRangeKm - 10).coerceAtLeast(10)) } }, { c.editSettings { it.copy(lowRangeKm = (it.lowRangeKm + 10).coerceAtMost(200)) } })
+        if (SHOW_ADVANCED_SETTINGS) NumRow("주행가능거리 기준", "${st.lowRangeKm}km", { c.editSettings { it.copy(lowRangeKm = (it.lowRangeKm - 10).coerceAtLeast(10)) } }, { c.editSettings { it.copy(lowRangeKm = (it.lowRangeKm + 10).coerceAtMost(200)) } })
         PleosSwitch(checked = st.voiceReply, onCheckedChange = { c.setVoiceReply(it) }, label = "음성 응답 사용", modifier = Modifier.testTag("set_voice_reply"))
-        Txt(if (st.voiceReply) "알림을 읽어 준 뒤 최대 8초 마이크로 한 번 듣고, 수락 표현이면 안내해요. 음성은 저장하지 않아요." else "알림은 화면과 음성 안내로만 하고 듣지 않아요. 화면 버튼으로만 수락해요.", PleosTheme.typography.labelMedium, secondary = true)
-        NumRow("신호 없을 때 가정 잔량", "${st.fallbackLevelPct}%", { c.editSettings { it.copy(fallbackLevelPct = (it.fallbackLevelPct - 5).coerceAtLeast(5)) } }, { c.editSettings { it.copy(fallbackLevelPct = (it.fallbackLevelPct + 5).coerceAtMost(95)) } })
+        if (SHOW_ADVANCED_SETTINGS) NumRow("신호 없을 때 가정 잔량", "${st.fallbackLevelPct}%", { c.editSettings { it.copy(fallbackLevelPct = (it.fallbackLevelPct - 5).coerceAtLeast(5)) } }, { c.editSettings { it.copy(fallbackLevelPct = (it.fallbackLevelPct + 5).coerceAtMost(95)) } })
         if (c.debuggable) {
-            Txt("시연 목적지 (기본: 없음)", secondary = true)
+            Txt("시연 목적지", secondary = true)
             val n = Presets.destinations.size
             PleosSegmentedTabs(Presets.destinations.map { it.name.substringBefore("(") } + "없음", st.destinationIndex ?: n,
                 { i -> c.setDestination(if (i < n) i else null) }, Modifier.fillMaxWidth().testTag("set_dest"))
@@ -432,32 +398,15 @@ private fun SettingsMaster(c: AppController, s: UiState, summary: Boolean = fals
     }
 }
 
-/** 설정 상세: 기록 초기화(항상) + 시연 패널(debuggable 만). */
+/** 설정 상세: 시연 패널(debuggable 만). 기록 삭제는 리포트 화면에만 둔다. */
 @Composable
 private fun SettingsDetail(c: AppController, s: UiState) {
-    PleosPanel(Modifier.fillMaxWidth(), title = "데이터 출처") {
-        Txt(s.dataLabel, PleosTheme.typography.labelMedium, secondary = true)
-        if (s.evMeta != null) Txt(DataLabels.ATTRIBUTION, PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("attribution"))
-    }
-    PleosPanel(Modifier.fillMaxWidth(), title = "저장된 기록") {
-        Txt("주유소/충전소명·시각·수량·금액을 이 기기에만 평문(암호화 없음)으로 저장해요. 위치 이력은 저장하지 않아요.", PleosTheme.typography.labelMedium, secondary = true)
-        KV("기록", "${s.p.report.size}건")
-        if (s.corruptKept) Txt("저장 파일이 손상돼 처음 상태로 시작했어요. 손상된 파일은 '기록 모두 삭제'로 지울 수 있어요.", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("corrupt_kept"))
-        if (s.saveHeld) Txt("${StoreRules.HELD_NOTICE}. ${StoreRules.HELD_RECOVERY}", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("save_held"))
-        ClearReportButton(c, s, Modifier.testTag("clear_report"))
-    }
     if (c.debuggable) SimPanel(c, s)
 }
 
 @Composable
 private fun SimPanel(c: AppController, s: UiState) {
     val e = s.energy
-    PleosPanel(Modifier.fillMaxWidth(), title = "차량 신호 상태 (SDK 실측)") {
-        KV("연료 %", e.fuelPercent?.toString() ?: SignalStatusText.missing(e.fuelError, c.debuggable))
-        KV("배터리 SoC %", e.evSocPercent?.toString() ?: SignalStatusText.missing(e.evError, c.debuggable))
-        KV("주행가능거리", e.rangeKm?.let { String.format(Locale.KOREA, "%.0f km", it) } ?: SignalStatusText.missing(e.rangeError, c.debuggable))
-        KV("현재 위치", if (s.originReal) "신호/시뮬 위치" else "기본(강남 샘플 37.505,127.0499)")
-    }
     PleosPanel(Modifier.fillMaxWidth(), title = "시연: 잔량 시뮬레이션") {
         val p = s.p
         PleosSwitch(checked = p.simFuel != null, onCheckedChange = { c.setSimFuel(if (it) 30 else null) }, label = "연료 % 시뮬레이션")
@@ -470,13 +419,19 @@ private fun SimPanel(c: AppController, s: UiState) {
             PleosButton("알림 시험", onClick = { c.fireAlert("시험 알림") }, hierarchy = PleosButtonHierarchy.Secondary)
             PleosButton("알림 재무장", onClick = { c.rearm() }, hierarchy = PleosButtonHierarchy.Secondary)
         }
-        Txt("알림 상태: ${if (p.armed) "대기(재무장됨)" else "울림(회복 전까지 재알림 없음)"}", PleosTheme.typography.labelMedium, secondary = true)
+        Txt("알림 상태: ${if (p.armed) "대기" else "울림"}", PleosTheme.typography.labelMedium, secondary = true)
     }
 }
+
+/** 주행 중 카드를 그릴지: 배너도 한 줄 안내도 없으면 글자 없는 빈 카드가 되므로 그리지 않는다. */
+internal fun drivingHasContent(hasBanner: Boolean, idleLine: String): Boolean = hasBanner || idleLine.isNotEmpty()
 
 /** 상태 이름이 이미 "음성"으로 시작하면(예: 음성 안내만) 접두어를 중복해 붙이지 않는다. */
 internal fun voiceLabel(status: String): String = if (status.startsWith("음성")) status else "음성 $status"
 
 /** 주행 중 한 줄 상태: 음성 상태 + 내비 요약. 내비 쪽은 고정 짧은 단어라 [AlertText.BANNER_MAX] 제한에서도 잘리지 않는다. */
-internal fun drivingStatusLine(voiceStatus: String, navi: NaviStatus): String =
-    AlertText.shorten(voiceLabel(voiceStatus) + (NaviConnectRules.shortWord(navi)?.let { " · $it" } ?: ""))
+internal fun drivingStatusLine(voiceStatus: String, navi: NaviStatus): String {
+    // 진행형('발화 중'/'듣는 중')은 숨기고 결과어(수락·거절 등)와 내비 단어만 남긴다
+    val voice = if (voiceStatus == VoiceStatus.SPEAKING || voiceStatus == VoiceStatus.LISTENING) null else voiceLabel(voiceStatus)
+    return AlertText.shorten(listOfNotNull(voice, NaviConnectRules.shortWord(navi)).joinToString(" · "))
+}

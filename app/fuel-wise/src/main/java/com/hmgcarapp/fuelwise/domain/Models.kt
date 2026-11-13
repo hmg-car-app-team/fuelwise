@@ -75,18 +75,12 @@ object Presets {
 
     /** 가공 샘플 카드. 실제 카드사 상품이 아니다. */
     val discounts = listOf(
-        Discount("card_a", "샘플 주유카드 A (A정유 -60원/L)", setOf("A정유"), wonPerLiter = 60),
-        Discount("card_all", "샘플 멤버십 B (전 브랜드 -20원/L)", emptySet(), wonPerLiter = 20),
-        Discount("ev_member", "샘플 충전 멤버십 (충전 10% 할인)", emptySet(), evPercent = 10),
+        Discount("card_a", "주유카드 A (A정유 -60원/L)", setOf("A정유"), wonPerLiter = 60),
+        Discount("card_all", "멤버십 B (전 브랜드 -20원/L)", emptySet(), wonPerLiter = 20),
+        Discount("ev_member", "충전 멤버십 (충전 10% 할인)", emptySet(), evPercent = 10),
     )
 }
 
 /** 내비 활성 경로의 실제 목적지(읽기 전용 질의 결과). [remainDistance] 는 SDK 가 준 남은 거리 값(단위 미확인: 계산에 쓰지 않는다). */
 data class RouteDestination(val pos: LatLon, val name: String? = null, val remainDistance: Int? = null)
 
-/** 우회 표기 문구. 목적지 유무에 따라 근사 방식이 다름을 구분해 보여 준다(둘 다 직선 근사, 실제 경로 아님). */
-object DetourText {
-    const val ROUTE_ESTIMATE = "경로 추정 우회(직선 근사)"
-    const val ROUNDTRIP_ESTIMATE = "왕복 추정(목적지 없음)"
-    fun label(hasDestination: Boolean) = if (hasDestination) ROUTE_ESTIMATE else ROUNDTRIP_ESTIMATE
-}

@@ -36,11 +36,11 @@ class FixFTests {
         assertEquals(20_000L, AlertGate.ORIGIN_TIMEOUT_MS)
     }
 
-    @Test fun alertText_mentionsUnverifiedLocation() {
+    @Test fun alertText_doesNotMentionUnverifiedLocation() {
         val q = quote()
         val t = AlertText.voice("잔량 15%", q, "주유", RoutePlans.ASK_START, locationUnverified = true)
-        assertTrue(t, t.contains(AlertText.LOCATION_NOTE))
-        assertFalse(AlertText.voice("잔량 15%", q, "주유", RoutePlans.ASK_START).contains("현재 위치"))
+        assertFalse(t, t.contains("기본 위치") || t.contains("현재 위치"))
+        assertEquals(t, AlertText.voice("잔량 15%", q, "주유", RoutePlans.ASK_START))
     }
 
     // N2

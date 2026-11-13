@@ -90,7 +90,10 @@ class FixGTests {
         val longReason = NaviStatus.Failed("경로를 찾지 못했어요 그래서 아주 긴 사유가 붙어도", 1)
         val line = drivingStatusLine(VoiceStatus.NOT_ACCEPTED, longReason)
         assertTrue(line, line.length <= 40 && line.endsWith("요청 실패"))
-        assertEquals("음성 발화 중", drivingStatusLine(VoiceStatus.SPEAKING, NaviStatus.Idle))
+        assertEquals("진행형 음성 상태는 숨김", "", drivingStatusLine(VoiceStatus.SPEAKING, NaviStatus.Idle))
+        assertEquals("", drivingStatusLine(VoiceStatus.LISTENING, NaviStatus.Idle))
+        assertEquals("음성 수락", drivingStatusLine(VoiceStatus.ACCEPTED, NaviStatus.Idle))
+        assertEquals("요청 중", drivingStatusLine(VoiceStatus.SPEAKING, NaviStatus.Pending("p", 1)))
     }
 
     // ---------- S2 ----------

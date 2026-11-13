@@ -20,7 +20,6 @@ data class UiState(
     val candidates: List<Candidate> = emptyList(),
     val dataLabel: String = "불러오는 중",
     /** 헤더용 짧은 데이터 라벨 */
-    val dataShort: String = "불러오는 중",
     /** 충전소 공공데이터 스냅샷 출처(실데이터일 때만; 가공 샘플이면 null) */
     val evMeta: com.hmgcarapp.fuelwise.data.EvMeta? = null,
     val origin: LatLon = DEFAULT_ORIGIN,
@@ -39,7 +38,6 @@ data class UiState(
     /** 앱이 debuggable 인지(시연 컨트롤·내부 문구 노출 여부). */
     val debuggable: Boolean = false,
     /** 에너지 모드가 자동이 아닐 때 헤더에 붙일 안내('(설정: 전기)'). */
-    val modeNote: String? = null,
     /** 읽기 오류 또는 쓰기 실패로 이번 실행 동안 저장을 보류 중(설정 화면에 상시 표시). 세션 중 재읽기는 없다: 회복은 앱 재시작 또는 '기록 모두 삭제'(성공 시 쓰기 재개). */
     /** 내비 활성 경로의 실제 목적지(읽기 전용 질의 결과; 없거나 실패면 null). 평가에만 쓰고 안내 방식(경유지/직접)은 바꾸지 않는다. */
     val routeDest: RouteDestination? = null,

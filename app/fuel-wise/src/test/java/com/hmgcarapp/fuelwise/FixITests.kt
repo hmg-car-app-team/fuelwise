@@ -9,7 +9,6 @@ import com.hmgcarapp.fuelwise.app.StateStore
 import com.hmgcarapp.fuelwise.data.FallbackStationRepository
 import com.hmgcarapp.fuelwise.data.StationRepository
 import com.hmgcarapp.fuelwise.domain.Candidate
-import com.hmgcarapp.fuelwise.domain.DriveNotice
 import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.LatLon
 import com.hmgcarapp.fuelwise.domain.MessageRules
@@ -62,9 +61,10 @@ class FixITests {
 
     @Test fun summaryLine_onlyWhenStorageProblem() {
         assertNull(StoreRules.summaryLine(false, false))
-        assertTrue(StoreRules.summaryLine(true, false)!!.contains("저장하지 않아요"))
-        assertTrue(StoreRules.summaryLine(false, true)!!.contains("손상"))
-        assertTrue(StoreRules.summaryLine(true, true)!!.contains("보류"))
+        assertEquals("저장하지 못했어요", StoreRules.summaryLine(true, false))
+        assertEquals("저장하지 못했어요", StoreRules.summaryLine(false, true))
+        assertEquals("저장하지 못했어요", StoreRules.summaryLine(true, true))
+        for (h in listOf(true, false)) for (c in listOf(true, false)) StoreRules.summaryLine(h, c)?.let { m -> assertFalse(m.contains("오류") || m.contains("보류") || m.contains("손상")) }
     }
 
     // ---- 안내 보류: 주행 중 -> 정차 시 한 번 ----
@@ -96,13 +96,6 @@ class FixITests {
         var threw = false
         try { safelyCatching({ seen = null }) { throw OutOfMemoryError("x") } } catch (e: OutOfMemoryError) { threw = true }
         assertTrue(threw)
-    }
-
-    // ---- 주행 화면 안내 ----
-    @Test fun driveNotice_onlyWhenGearUnknownAndUxUnknown() {
-        assertEquals(DriveNotice.UNVERIFIED, DriveNotice.of(Gear.UNKNOWN, null))
-        assertNull(DriveNotice.of(Gear.UNKNOWN, false)); assertNull(DriveNotice.of(Gear.UNKNOWN, true))
-        assertNull(DriveNotice.of(Gear.DRIVE, null)); assertNull(DriveNotice.of(Gear.PARK, null))
     }
 
     private class MixedPort(val name: String, val log: MutableList<String>) : EnergyPort {

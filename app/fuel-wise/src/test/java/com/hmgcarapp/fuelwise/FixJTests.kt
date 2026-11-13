@@ -27,11 +27,11 @@ import java.io.File
 @OptIn(ExperimentalCoroutinesApi::class)
 class FixJTests {
     // ---- r8R1-3 ----
-    @Test fun recordedMessage_saveHeld_saysSessionOnly_otherwiseKeepsOldWording() {
-        assertEquals("기록됨: 강남 센트럴 주유소 (추정 절약 1,350원)", StoreRules.recordedMessage("강남 센트럴 주유소", 1350L, saveHeld = false))
+    @Test fun recordedMessage_sameWordingRegardlessOfSaveHeld() {
+        assertEquals("기록됨: 강남 센트럴 주유소", StoreRules.recordedMessage("강남 센트럴 주유소", 1350L, saveHeld = false))
         val held = StoreRules.recordedMessage("강남 센트럴 주유소", 1350L, saveHeld = true)
-        assertEquals("기록됨(이번 실행에서만 유지): 강남 센트럴 주유소 (추정 절약 1,350원)", held)
-        assertTrue(held.contains("이번 실행에서만"))
+        assertEquals("기록됨: 강남 센트럴 주유소", held)
+        assertFalse(held.contains("이번 실행에서만"))
     }
 
     // ---- r8R2-2: Navi 정책값 고정(동작 불변) ----

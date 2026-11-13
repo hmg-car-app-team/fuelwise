@@ -76,7 +76,7 @@ class AlertRunner(
                 }
                 if (fx.alertId != null) alert(fx.alertId) { body() } else launchInto({ guidanceJob = it }) { guarded(null) { body() } }
             }
-            is AlertEffect.SpeakResult -> alert(fx.id) { speaker.speakAndAwait(fx.text); dispatch(AlertEvent.ResultSpoken(fx.id)) } // 결과 확인 발화(짧게)
+            is AlertEffect.SpeakResult -> alert(fx.id) { if (fx.text.isNotBlank()) speaker.speakAndAwait(fx.text); dispatch(AlertEvent.ResultSpoken(fx.id)) } // 결과 확인 발화(짧게)
             is AlertEffect.ScheduleExpiry -> { expiryJob?.cancel(); expiryJob = scope.launch { delay(fx.delayMs); dispatch(AlertEvent.ExpiryElapsed(fx.id)) } }
             is AlertEffect.ClearNaviFinished -> if (fx.reqId == null) navi.clearFinished() else navi.clearFinished(fx.reqId)
             is AlertEffect.Warn -> HmgLog.w("FuelWise", fx.text)

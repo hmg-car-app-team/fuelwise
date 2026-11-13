@@ -80,7 +80,17 @@ class RoutePlanTest {
     @Test fun spokenResult_isShortKorean() {
         assertEquals(NaviText.WAYPOINT_ADDED, NaviText.spoken(NaviStatus.Success(NaviText.WAYPOINT_ADDED)))
         assertEquals("경로를 찾지 못했어요", NaviText.spoken(NaviStatus.Failed("경로를 찾지 못했어요")))
-        assertEquals(NaviText.NO_RESPONSE, NaviText.spoken(null))
+        assertEquals("", NaviText.spoken(null)) // 무응답: 실패 음성 없음
+        assertEquals("", NaviText.spoken(NaviReducer.onTimeout(NaviStatus.Pending("x", 1), 1)))
+        assertTrue(NaviText.isNoResponse(null)); assertTrue(NaviText.isNoResponse(NaviReducer.onTimeout(NaviStatus.Pending("x", 1), 1)))
+        val err = NaviReducer.onError(NaviStatus.Pending("x", 1), "CAUSE_SEARCH_ROUTE")
+        assertFalse(NaviText.isNoResponse(err)); assertEquals("요청에 실패했어요", NaviText.spoken(err))
+        // 배지: 무응답은 '요청 실패'가 아니라 중립 단어
+        assertEquals("결과 미확인", com.hmgcarapp.fuelwise.navi.NaviConnectRules.shortWord(NaviStatus.Failed(NaviText.NO_RESPONSE, 1)))
+        assertEquals("요청 실패", com.hmgcarapp.fuelwise.navi.NaviConnectRules.shortWord(err))
+        assertFalse(com.hmgcarapp.fuelwise.ui.drivingHasContent(false, ""))
+        assertTrue(com.hmgcarapp.fuelwise.ui.drivingHasContent(false, "주행가능거리 123km"))
+        assertTrue(com.hmgcarapp.fuelwise.ui.drivingHasContent(true, ""))
     }
 
     // ---- M2: 배너 라벨·수동 누름 재확인·팝업 조건 ----
@@ -140,7 +150,7 @@ class RoutePlanTest {
     @Test fun reducer_carriesRequestIdToResults() {
         val p = NaviStatus.Pending("경유지 추가 요청 중", 7)
         assertEquals(NaviStatus.Success(NaviText.WAYPOINT_ADDED, 7), NaviReducer.onSuccess(p, NaviText.WAYPOINT_ADDED))
-        assertEquals(NaviStatus.Failed("경로를 찾지 못했어요", 7), NaviReducer.onError(p, "CAUSE_SEARCH_ROUTE"))
+        assertEquals(NaviStatus.Failed("요청에 실패했어요", 7), NaviReducer.onError(p, "CAUSE_SEARCH_ROUTE"))
         assertEquals(NaviStatus.Failed(NaviText.NO_RESPONSE, 7), NaviReducer.onTimeout(p, 7))
     }
 

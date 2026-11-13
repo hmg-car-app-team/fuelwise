@@ -64,9 +64,8 @@ class TextTest {
         codes.forEach { c ->
             val m = NaviText.errorMessage(c)
             assertFalse(m, m.contains("CAUSE") || m.contains("_") || m.startsWith("내비"))
-            assertTrue(m, m.any { it in '가'..'힣' })
+            assertEquals("요청에 실패했어요", m) // 원인별 사유 없이 한 문장으로 통일
         }
-        assertEquals("경로를 찾지 못했어요", NaviText.errorMessage("CAUSE_SEARCH_ROUTE"))
     }
 
     @Test fun naviReducer_onlyChangesWhenPending() {
@@ -78,12 +77,12 @@ class TextTest {
         assertSame(done, NaviReducer.onError(done, "CAUSE_SEARCH_ROUTE")) // 관계없는 늦은 오류 무시
         val pending = NaviStatus.Pending("요청")
         assertEquals(NaviStatus.Success(NaviText.WAYPOINT_ADDED), NaviReducer.onSuccess(pending, NaviText.WAYPOINT_ADDED))
-        assertEquals(NaviStatus.Failed("경로를 찾지 못했어요"), NaviReducer.onError(pending, "CAUSE_SEARCH_ROUTE"))
+        assertEquals(NaviStatus.Failed("요청에 실패했어요"), NaviReducer.onError(pending, "CAUSE_SEARCH_ROUTE"))
         assertEquals(NaviStatus.Failed(NaviText.NO_RESPONSE), NaviReducer.onTimeout(pending))
     }
 
     @org.junit.Test fun detailEmptyDoesNotRepeatNoCandidateNotice() {
-        org.junit.Assert.assertEquals("후보가 생기면 여기에 상세가 보여요.", com.hmgcarapp.fuelwise.ui.detailEmptyText(true))
+        org.junit.Assert.assertEquals("후보를 선택하세요.", com.hmgcarapp.fuelwise.ui.detailEmptyText(true))
         org.junit.Assert.assertEquals("후보를 선택하세요.", com.hmgcarapp.fuelwise.ui.detailEmptyText(false))
         org.junit.Assert.assertFalse(com.hmgcarapp.fuelwise.ui.detailEmptyText(true).contains("후보가 없어요"))
     }

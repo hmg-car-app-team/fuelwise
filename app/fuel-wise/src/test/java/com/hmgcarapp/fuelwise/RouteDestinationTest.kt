@@ -2,7 +2,6 @@ package com.hmgcarapp.fuelwise
 
 import com.hmgcarapp.fuelwise.app.UiState
 import com.hmgcarapp.fuelwise.domain.Candidate
-import com.hmgcarapp.fuelwise.domain.DetourText
 import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.EvalInput
 import com.hmgcarapp.fuelwise.domain.FuelGrade
@@ -163,11 +162,5 @@ class RouteDestinationTest {
         val p = poller({ RouteMode.ACTIVE }, { if (boom) throw IllegalStateException("x") else dst }, c)
         assertNull(p.poll()); assertFalse(p.due())
         boom = false; c.t += 30_000; assertTrue(p.due()); assertEquals(dst, p.poll())
-    }
-
-    @Test fun detourText_distinguishesRouteEstimateFromRoundTrip() {
-        assertNotEquals(DetourText.label(true), DetourText.label(false))
-        assertEquals("경로 추정 우회(직선 근사)", DetourText.label(true))
-        assertEquals("왕복 추정(목적지 없음)", DetourText.label(false))
     }
 }

@@ -54,10 +54,6 @@ object EnergyResolver {
 
     /** 실효 모드: 시연 모드(메모리 전용)가 있으면 그것, 없으면 저장된 설정. 시연 모드는 저장된 설정을 바꾸지 않는다. */
     fun effectiveMode(simMode: EnergyMode?, setting: EnergyMode): EnergyMode = simMode ?: setting
-
-    /** 모드가 자동이 아니면 헤더에 붙일 안내('(설정: 전기)'). 시연 모드는 '(시연: …)'. */
-    fun modeNote(mode: EnergyMode, simulated: Boolean): String? =
-        if (mode == EnergyMode.AUTO) null else "(${if (simulated) "시연" else "설정"}: ${mode.label})"
 }
 
 /** 이전 기준 위치에서 [thresholdKm] 이상 움직였을 때만 true(첫 호출은 항상 true). 통과하면 기준 위치를 갱신한다. */
@@ -75,37 +71,34 @@ class MoveGate(private val thresholdKm: Double) {
 /** 알림 문구(순수). 후보명 뒤 조사는 [Josa] 로 맞춘다. */
 object AlertText {
     const val BANNER_MAX = 40
-    /** 실위치를 받지 못한 채 알릴 때(N1) 덧붙이는 안내. */
-    const val LOCATION_NOTE = "현재 위치를 확인하지 못해 기본 위치 기준이에요."
 
     /**
      * [ask] 는 마지막 질문([RoutePlans] 가 경로 상태에 맞춰 만든다). 후보명이 소문자 섞인 영어로 끝나면 조사를 추정하지 않고
      * '추천 후보는 NAME.' 으로 문장을 재구성한다.
      */
     fun voice(reason: String, best: Quote?, unit: String, ask: String, locationUnverified: Boolean = false): String {
-        if (best == null) return "$reason. 근처 $unit 후보를 찾지 못했어요."
+        if (best == null) return "$reason."
         val name = best.candidate.name
         val km = String.format(Locale.KOREA, "%.1f", best.detourKm)
         val lead = if (Josa.isNeutral(name)) "추천 후보는 $name." else null
         fun sentence(pred: String) = if (lead != null) "$lead $pred" else "${Josa.subject(name)} $pred"
         val assumed = best.candidate.priceAssumed
         val basis = when {
-            assumed && best.isBaseline -> sentence("우회가 가장 적어 추천해요(대략 ${km}km). 요금은 가정 단가예요.")
-            assumed -> sentence("우회·대기 기준으로 추천해요(우회 대략 ${km}km). 요금은 가정 단가예요.")
+            assumed && best.isBaseline -> sentence("우회가 가장 적어 추천해요(대략 ${km}km).")
+            assumed -> sentence("우회·대기 기준으로 추천해요(우회 대략 ${km}km).")
             best.isBaseline -> sentence("우회가 가장 적어 추천해요(대략 ${km}km).")
             best.netSaving > 0 -> sentence("대략 ${km}km 돌아가도 실질 ${String.format(Locale.KOREA, "%,d", best.netSaving)}원 절약돼요.")
             else -> sentence("실질 비용이 가장 낮아요(우회 대략 ${km}km).")
         }
-        val note = if (locationUnverified) " $LOCATION_NOTE" else ""
-        return "$reason.$note $basis $ask"
+        return "$reason. $basis $ask"
     }
 
     /**
      * 주행 중 배너 한 줄(최대 [BANNER_MAX]자): '이유 · 후보명 · 약 N원 절약'. 절약이 있으면 후보명을 줄여서라도 절약액을 남긴다.
      */
     fun line(reason: String, best: Quote?): String {
-        if (best == null) return shorten("$reason · 근처 후보를 찾지 못했어요")
-        val tail = if (best.candidate.priceAssumed) " · 가정 단가" else if (!best.isBaseline && best.netSaving > 0) " · 약 ${String.format(Locale.KOREA, "%,d", best.netSaving)}원 절약" else ""
+        if (best == null) return shorten(reason)
+        val tail = if (!best.isBaseline && !best.candidate.priceAssumed && best.netSaving > 0) " · 약 ${String.format(Locale.KOREA, "%,d", best.netSaving)}원 절약" else ""
         val head = "$reason · "
         val room = (BANNER_MAX - head.length - tail.length).coerceAtLeast(4)
         return shorten(head + shorten(best.candidate.name, room) + tail)
@@ -113,7 +106,7 @@ object AlertText {
 
     /** 알림이 없을 때 주행 중 한 줄 상태. */
     fun idleLine(rangeKm: Float?): String =
-        if (rangeKm != null && rangeKm.isFinite()) "알림 대기 중 · 주행가능거리 ${String.format(Locale.KOREA, "%.0f", rangeKm)}km" else "알림 대기 중"
+        if (rangeKm != null && rangeKm.isFinite()) "주행가능거리 ${String.format(Locale.KOREA, "%.0f", rangeKm)}km" else ""
 
     fun shorten(s: String, max: Int = BANNER_MAX) = if (s.length <= max) s else s.take(max - 1) + "…"
 }
