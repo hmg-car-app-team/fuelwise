@@ -24,6 +24,7 @@ import com.hmgcarapp.fuelwise.domain.Settings
 import com.hmgcarapp.fuelwise.domain.SortKey
 import com.hmgcarapp.fuelwise.domain.VoiceStatus
 import com.hmgcarapp.fuelwise.map.MapBase
+import com.hmgcarapp.fuelwise.map.RoadDetour
 import com.hmgcarapp.fuelwise.navi.NaviAction
 import com.hmgcarapp.fuelwise.navi.NaviStatus
 import com.hmgcarapp.fuelwise.navi.NaviText
@@ -124,6 +125,9 @@ internal object RenderFixtures {
     /** 앱과 같은 오프라인 지도 바탕. */
     val mapBase: MapBase by lazy { MapBase.parse(asset(MapBase.ASSET)) }
 
+    /** 앱과 같은 도로망 기준 우회 거리. */
+    private val roadDetour: RoadDetour by lazy { RoadDetour(mapBase.router) }
+
     /** 앱의 FakeStationRepository 와 같은 병합(주유소 샘플 + 충전소 스냅샷). */
     private val merged: StationData.Merged by lazy { StationData.merge(asset("stations_sample.json"), asset("ev_stations.json")) }
     private val evMeta: EvMeta? get() = merged.evMeta
@@ -132,7 +136,7 @@ internal object RenderFixtures {
     private fun quotes(kind: EnergyKind, level: Int, dest: LatLon?, cards: Set<String>, settings: Settings): List<Quote> {
         val qty = Recommender.quantityFor(kind, level, settings)
         val near = Recommender.candidatesFor(candidates, origin, dest, 160.0)
-        val input = EvalInput(origin, dest, kind, settings, Presets.discounts.filter { it.id in cards }, qty)
+        val input = EvalInput(origin, dest, kind, settings, Presets.discounts.filter { it.id in cards }, qty, roadDetour)
         return Recommender.sort(Recommender.evaluate(input, near), settings.sort)
     }
 

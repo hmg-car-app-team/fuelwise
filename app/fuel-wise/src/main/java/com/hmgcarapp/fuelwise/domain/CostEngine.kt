@@ -49,6 +49,14 @@ object DetourModel {
     }
 }
 
+/**
+ * 우회 거리(km)를 따로 어림하는 방법(예: 앱에 넣은 지도의 도로망). 정의는 [DetourModel] 과 같다(목적지가 없으면 왕복).
+ * 후보마다 null 을 돌려주면(지도 밖·도로에서 먼 곳) 그 후보는 [DetourModel] 직선 근사로 계산한다.
+ */
+fun interface DetourEstimator {
+    fun detourKm(origin: LatLon, dest: LatLon?, station: LatLon): Double?
+}
+
 data class Quote(
     val candidate: Candidate,
     val listUnitPrice: Double,
@@ -80,6 +88,8 @@ data class EvalInput(
     val discounts: List<Discount>,
     /** 주입량: 주유 L / 충전 kWh */
     val quantity: Double,
+    /** 우회 거리 어림(도로망). null 이면 모든 후보를 직선 근사로 계산한다. */
+    val detour: DetourEstimator? = null,
 )
 
 object Recommender {
@@ -147,7 +157,8 @@ object Recommender {
                 c.kind == EnergyKind.FUEL -> listPrice - d.wonPerLiter
                 else -> listPrice * (100 - d.evPercent) / 100.0
             }
-            val detour = DetourModel.detourKm(input.origin, input.dest, c.pos)
+            val detour = input.detour?.detourKm(input.origin, input.dest, c.pos)?.takeIf { it.isFinite() && it >= 0.0 }
+                ?: DetourModel.detourKm(input.origin, input.dest, c.pos)
             val extraMin = detour / DetourModel.DETOUR_SPEED_KMH * 60 + c.waitMin
             val chargeMin = if (c.kind == EnergyKind.EV) input.quantity / kw * 60 else 0.0
             Raw(c, listPrice, unit, d?.name, detour, extraMin, chargeMin)

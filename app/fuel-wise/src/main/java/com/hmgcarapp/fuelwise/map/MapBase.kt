@@ -3,6 +3,8 @@ package com.hmgcarapp.fuelwise.map
 import android.content.Context
 import com.hmgcarapp.fuelwise.domain.LatLon
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -171,9 +173,16 @@ class MapBase(val shapes: List<MapShape>, val labels: List<MapLabel>) {
 
         fun cachedOrNull(): MapBase? = cached
 
-        /** 앱 assets 에서 한 번만 읽는다(IO). 도로망도 여기서 미리 만든다(화면 그리기 중에 만들지 않게). 실패하면 null -> 격자 바탕. */
-        suspend fun load(context: Context): MapBase? = cached ?: withContext(Dispatchers.IO) {
-            cached ?: runCatching { context.assets.open(ASSET).bufferedReader().use { parse(it.readText()) }.also { it.router } }.getOrNull()?.also { cached = it }
+        private val loadLock = Mutex()
+
+        /**
+         * 앱 assets 에서 한 번만 읽는다(IO). 화면과 컨트롤러가 함께 불러도 한 번만 읽는다.
+         * 도로망도 여기서 미리 만든다(화면 그리기 중에 만들지 않게). 실패하면 null -> 격자 바탕·직선 근사.
+         */
+        suspend fun load(context: Context): MapBase? = cached ?: loadLock.withLock {
+            cached ?: withContext(Dispatchers.IO) {
+                runCatching { context.assets.open(ASSET).bufferedReader().use { parse(it.readText()) }.also { it.router } }.getOrNull()
+            }?.also { cached = it }
         }
     }
 }

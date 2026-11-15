@@ -22,6 +22,7 @@ import com.hmgcarapp.fuelwise.domain.AlertEvent
 import com.hmgcarapp.fuelwise.domain.AlertFlow
 import com.hmgcarapp.fuelwise.domain.AlertGate
 import com.hmgcarapp.fuelwise.domain.AlertInput
+import com.hmgcarapp.fuelwise.domain.DetourEstimator
 import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.EnergyMode
 import com.hmgcarapp.fuelwise.domain.EnergyResolver
@@ -35,6 +36,8 @@ import com.hmgcarapp.fuelwise.domain.Settings
 import com.hmgcarapp.fuelwise.domain.SortKey
 import com.hmgcarapp.fuelwise.domain.StoreRules
 import com.hmgcarapp.fuelwise.domain.safelyCatching
+import com.hmgcarapp.fuelwise.map.MapBase
+import com.hmgcarapp.fuelwise.map.RoadDetour
 import com.hmgcarapp.fuelwise.navi.NaviController
 import com.hmgcarapp.fuelwise.navi.RouteAdvisor
 import com.hmgcarapp.fuelwise.navi.RouteDestinationPoller
@@ -75,6 +78,8 @@ class AppController(
     private val loader: CandidateLoader
     /** 위치 갱신으로 인한 재계산은 이전 계산 위치에서 100m 이상 움직였을 때만(후보 재로드 임계 2km 는 CandidateCache). */
     private val moveGate = MoveGate(RECOMPUTE_MOVE_KM)
+    /** 우회 거리 어림: 지도 바탕(도로망)을 읽은 뒤부터 지도 경로선과 같은 도로 기준. 그 전이나 지도 밖 후보는 직선 근사. */
+    private var roadDetour: DetourEstimator? = null
     val debuggable: Boolean = SimulationHub.isDebuggable(context)
     val navi = NaviController(context, scope, debuggable)
     private val energySource = PleosEnergySource(context)
@@ -104,6 +109,8 @@ class AppController(
         navi.connect()
         scope.launch { restore() }
         defaultLoadJob = scope.launch { applyLoad(UiState.DEFAULT_ORIGIN) }
+        // 지도 바탕을 읽으면 우회 거리를 도로 기준으로 다시 계산한다
+        scope.launch { MapBase.load(context)?.let { roadDetour = RoadDetour(it.router); recompute() } }
         scope.launch {
             // flow 가 예외/완료로 끝나도 에너지 수집이 영구 중단되지 않게 간격을 두고 다시 시작한다(취소 시에만 종료)
             while (true) {
@@ -214,7 +221,7 @@ class AppController(
         val dest = prev.evalDest
         val near = Recommender.candidatesFor(prev.candidates, prev.origin, dest, r.rangeKm?.toDouble())
         val quotes = Recommender.sort(
-            Recommender.evaluate(EvalInput(prev.origin, dest, r.kind, s, cards, qty), near), s.sort,
+            Recommender.evaluate(EvalInput(prev.origin, dest, r.kind, s, cards, qty, roadDetour), near), s.sort,
         )
         // 후보가 하나도 없으면(로드 전·범위 밖) 저장된 선택을 건드리지 않는다
         val selected = if (quotes.isEmpty()) p.selectedId else p.selectedId?.takeIf { id -> quotes.any { it.candidate.id == id } } ?: quotes.first().candidate.id

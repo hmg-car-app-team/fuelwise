@@ -14,7 +14,7 @@
    ```
    adb install -r apk/hmg-car-app-team_FuelWise_release.apk
    ```
-   0.2.0 은 서명 인증서가 이전 0.1.0 과 다릅니다. 0.1.0 이 깔려 있으면 설치가 거부되므로(INSTALL_FAILED_UPDATE_INCOMPATIBLE) 먼저 `adb uninstall com.hmgcarapp.fuelwise` 로 지운 뒤 설치합니다.
+   0.2 버전부터 서명 인증서가 이전 0.1.0 과 다릅니다. 0.1.0 이 깔려 있으면 설치가 거부되므로(INSTALL_FAILED_UPDATE_INCOMPATIBLE) 먼저 `adb uninstall com.hmgcarapp.fuelwise` 로 지운 뒤 설치합니다.
 2. 앱 아이콘으로 실행하고, 첫 실행의 권한은 정차 상태에서 허용합니다.
 
 ## 테스트 환경
@@ -26,7 +26,7 @@
 
 ## 데이터 출처
 - **충전소 정보**: 한국환경공단 『전기자동차 충전소 정보』(공공데이터포털 data.go.kr), 공공누리 제1유형(출처표시), 가공·편집됨. 기준일 2026-11-11.
-- **지도**: © OpenStreetMap contributors, Open Database License(ODbL) 1.0. 강남·서초·송파·성남 일대의 도로·하천·녹지·건물·지명을 앱에 넣어(오프라인) 그립니다. 지도 위 경로선은 이 도로망에서 찾은 예시이며 실제 안내 경로는 내비가 정합니다.
+- **지도**: © OpenStreetMap contributors, Open Database License(ODbL) 1.0. 강남·서초·송파·성남 일대의 도로·하천·녹지·건물·지명을 앱에 넣어(오프라인) 그립니다. 지도 위 경로선과 카드의 우회 거리는 이 도로망에서 찾은 어림값(지도 밖은 직선거리 x 1.3)이며 실제 안내 경로는 내비가 정합니다.
 - **유가·주유소 목록**은 가공 샘플이며, 화면의 절약액은 실제 금액이 아닙니다.
 - 충전 요금은 가정 단가이므로 요금 비교와 절약 계산에서 제외합니다.
 
