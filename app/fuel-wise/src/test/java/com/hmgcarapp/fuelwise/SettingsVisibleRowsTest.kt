@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** 4차: 설정에는 연비·전비·탱크·배터리 용량 4행만 항상 노출하고, 나머지 고급 항목은 계속 숨긴다. */
-class Round4RestoreTest {
+/** 설정에는 연비·전비·탱크·배터리 용량 4행만 항상 노출하고, 나머지 고급 항목은 계속 숨긴다. */
+class SettingsVisibleRowsTest {
     private val ui = File("src/main/java/com/hmgcarapp/fuelwise/ui/Screens.kt").readText()
 
     @Test fun fourVehicleRowsAlwaysShown_restStayHidden() {

@@ -19,8 +19,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Fix-F: N1~N4 */
-class FixFTests {
+/** 알림 보류(출발지 확정/시간 초과), 안내 문구, 교체 팝업, 질의 해석, 요청 경합, 엔진 만료·무응답 경계. */
+class AlertHoldAndEnginePollingTests {
     private fun quote() = Quote(
         Candidate("c", "강남 센트럴 주유소", "X", EnergyKind.FUEL, LatLon(0.0, 0.0)), 1700.0, 1700.0, null, 40.0, 68000, 2.5, 0, 68000, 0.0, 0.0, 0, 68000, 0, 0, true,
     )

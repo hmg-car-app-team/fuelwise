@@ -36,9 +36,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** Fix-I(라운드 7): 삭제 실패 복원, 안내 보류, 도메인별 끊김 래치, 예외 재던짐, 저장소 세대 검사. */
+/** 삭제 실패 복원, 안내 보류, 도메인별 끊김 래치, 예외 재던짐, 저장소 세대 검사. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class FixITests {
+class DeleteFailureRestoreTests {
     @get:Rule val tmp = TemporaryFolder()
     private val name = "fuelwise_state"
 

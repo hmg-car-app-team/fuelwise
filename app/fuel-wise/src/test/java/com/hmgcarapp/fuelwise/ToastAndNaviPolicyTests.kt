@@ -23,9 +23,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** Fix-J(라운드 8): 토스트 문구 판정, Navi 연결 정책 값, 오류 콜백 뒤 무응답 카운트 리셋. */
+/** 토스트 문구 판정, Navi 연결 정책 값, 오류 콜백 뒤 무응답 카운트 리셋. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class FixJTests {
+class ToastAndNaviPolicyTests {
     // ---- r8R1-3 ----
     @Test fun recordedMessage_sameWordingRegardlessOfSaveHeld() {
         assertEquals("기록됨: 강남 센트럴 주유소", StoreRules.recordedMessage("강남 센트럴 주유소", 1350L, saveHeld = false))

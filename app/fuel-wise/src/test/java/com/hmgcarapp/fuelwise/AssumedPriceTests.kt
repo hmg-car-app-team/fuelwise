@@ -13,7 +13,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.util.TimeZone
 
-class FixKTests {
+class AssumedPriceTests {
     private val tz = TimeZone.getTimeZone("UTC")
     private fun ev(id: String, extra: String = "") = """{"id":"$id","name":"충전 $id","brand":"B","lat":37.4,"lon":127.0,"won":320,"kw":100.0$extra}"""
     private fun snap(meta: String, vararg rows: String) = """{"_meta":{"source":"s","license":"l","collectedAt":"2026-11-11"$meta},"ev":[${rows.joinToString(",")}]}"""

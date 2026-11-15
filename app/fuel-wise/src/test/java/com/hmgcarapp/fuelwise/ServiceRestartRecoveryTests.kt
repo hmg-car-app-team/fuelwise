@@ -30,9 +30,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Fix-G: 서비스 재시작 복구(무응답 포트 교체·내비 재연결 규칙)·정직 라벨·저장 복구 규칙·판단 로직 순수 함수. */
+/** 서비스 재시작 복구(무응답 포트 교체·내비 재연결 규칙)·정직 라벨·저장 복구 규칙·판단 로직 순수 함수. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class FixGTests {
+class ServiceRestartRecoveryTests {
     // ---------- S3: EnergyPoller 무응답 연속 -> 포트 교체 ----------
     private class Silent(val name: String, val log: MutableList<String>, val answers: Boolean = false) : EnergyPort {
         override fun initialize() { log += "init $name" }

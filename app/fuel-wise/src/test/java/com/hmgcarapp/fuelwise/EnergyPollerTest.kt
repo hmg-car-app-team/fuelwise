@@ -109,9 +109,9 @@ class EnergyPollerTest {
     }
 }
 
-/** Fix-F P2: 포트 생성 불가 시 마지막 정상값 만료, 이전 포트의 늦은 콜백 무시, 연결 끊김 자동 재생성 간격. */
+/** 포트 생성 불가 시 마지막 정상값 만료, 이전 포트의 늦은 콜백 무시, 연결 끊김 자동 재생성 간격. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class EnergyPollerFixFTest {
+class EnergyPollerPortRecreationTest {
     private class P(val name: String, val log: MutableList<String>, val fail: Boolean = false) : EnergyPort {
         var cb: EnergyCallbacks? = null; var lastId = 0
         override fun initialize() { log += "init $name"; if (fail) throw IllegalStateException("boom") }

@@ -29,9 +29,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** Fix-H(라운드 6): 세션 편집 판정, 삭제 실패 처리, 이중 집계/무응답 복구, 내비 타임아웃 계수, 메시지·팝업 규칙. */
+/** 세션 편집 판정, 삭제 실패 처리, 이중 집계/무응답 복구, 내비 타임아웃 계수, 메시지·팝업 규칙. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class FixHTests {
+class SessionEditAndNaviTimeoutTests {
     @get:Rule val tmp = TemporaryFolder()
     private val name = "fuelwise_state"
 
@@ -78,7 +78,7 @@ class FixHTests {
     // ---- r6R5-9 ----
     @Test fun safelyCatching_catchesThrowable_butRethrowsCancellation() {
         var seen: Throwable? = null
-        safelyCatching({ seen = it }) { throw NoClassDefFoundError("x") } // Fix-I: VirtualMachineError(OOM 등)는 재던진다(FixITests)
+        safelyCatching({ seen = it }) { throw NoClassDefFoundError("x") } // VirtualMachineError(OOM 등)는 재던진다(DeleteFailureRestoreTests)
         assertTrue(seen is NoClassDefFoundError)
         var threw = false
         try { safelyCatching({ seen = null }) { throw CancellationException("c") } } catch (e: CancellationException) { threw = true }
