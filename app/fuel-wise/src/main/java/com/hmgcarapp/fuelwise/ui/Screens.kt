@@ -2,6 +2,7 @@ package com.hmgcarapp.fuelwise.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -180,12 +181,16 @@ private fun ReplacePopup(a: FuelWiseActions, rc: ReplaceConfirm) {
 }
 
 // ---------------- 주행 중: 움직이지 않는 지도 + 한 줄 안내 ----------------
+/** 이 폭 이상이면 주행 안내 카드(최대 760dp)와 축척 표시(약 460dp)가 한 줄에 겹치지 않는다. */
+private val DRIVING_SCALE_BESIDE_CARD = 1280.dp
+
 @Composable
 private fun DrivingView(s: UiState, navi: NaviStatus) {
     val b = s.banner
     val idle = if (b == null) AlertText.idleLine(s.rangeKm) else ""
     val hasCard = drivingHasContent(b != null, idle)
-    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(PleosRadius.xl)).testTag("driving_view")) {
+    BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(PleosRadius.xl)).testTag("driving_view")) {
+        val mapTop = if (hasCard) 176.dp else 16.dp
         // 주행 중에는 터치 없이 안내 대상(알림 후보, 없으면 선택 후보) 경로 하나만 그린다
         RouteMapCanvas(
             origin = s.origin,
@@ -193,11 +198,13 @@ private fun DrivingView(s: UiState, navi: NaviStatus) {
             dest = s.evalDest,
             destLabel = destLabelOf(s),
             quotes = s.quotes,
-            selectedId = b?.candidateId ?: s.p.selectedId,
+            // 알림이 있으면 그 후보만(사라졌으면 경로 없이), 없으면 고른 후보(없으면 1위)
+            selectedId = if (b != null) b.candidateId else (s.selected ?: s.quotes.firstOrNull())?.candidate?.id,
             focusOnly = true,
-            insets = MapInsets(left = 16.dp, top = if (hasCard) 176.dp else 16.dp, right = 16.dp, bottom = 16.dp),
+            insets = MapInsets(left = 16.dp, top = mapTop, right = 16.dp, bottom = 16.dp),
             onSelect = null,
-            scaleTop = 16.dp,
+            // 가로 창은 안내 카드 오른쪽 빈자리(지도 맨 위)에 축척을 둔다. 세로 창은 카드와 겹치므로 카드 아래에
+            scaleTop = if (maxWidth >= DRIVING_SCALE_BESIDE_CARD) 16.dp else mapTop,
         )
         // 보여 줄 내용이 없으면 빈 카드를 그리지 않는다
         if (hasCard) {

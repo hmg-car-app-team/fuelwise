@@ -80,6 +80,12 @@ class ScreenRenderTest {
     @Test fun r09() = render("09_report", RenderFixtures.state(page = Page.REPORT, report = RenderFixtures.report()))
     @Test fun r10() = render("10_settings", RenderFixtures.state(page = Page.SETTINGS))
     @Test fun r11() = render("11_candidates_empty", RenderFixtures.state(empty = true))
+    @Test @Config(qualifiers = PORTRAIT) fun r12() = render(
+        "12_driving_portrait",
+        RenderFixtures.state(withBanner = true, drive = DriveState.DRIVING),
+        navi = NaviStatus.Pending(NaviText.PENDING_WAYPOINT, 1),
+    )
+    @Test @Config(qualifiers = PORTRAIT) fun r13() = render("13_candidates_portrait_alert", RenderFixtures.state(dest = RenderFixtures.pangyo, withBanner = true))
 }
 
 /** 렌더링용: 아무 동작도 하지 않는다. */

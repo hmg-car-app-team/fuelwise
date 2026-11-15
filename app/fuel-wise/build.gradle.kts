@@ -12,6 +12,18 @@ val localProps = Properties().apply {
 }
 val apiKey: String = (localProps.getProperty("fuelwise.apiKey") ?: System.getenv("FUELWISE_API_KEY") ?: "").trim()
 
+// release 서명: app/.signing/signing.properties(커밋 금지, .gitignore)가 있으면 그 키로 서명한다(팀 공용 키, SafeRadar·WakeMate 와 같은 인증서).
+// 항목: storeFile(.signing/ 안의 파일 이름), storePassword, keyAlias, keyPassword. 없으면 서명되지 않은 release APK 가 나온다.
+val signingProps = Properties().apply {
+    rootProject.file(".signing/signing.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+val hasReleaseSigning = signingProps.getProperty("storeFile") != null
+logger.lifecycle("[signing] fuel-wise release: " + (if (hasReleaseSigning) "app/.signing" else "unsigned"))
+
+// 화면 렌더링 테스트는 -Pfuelwise.render=true 일 때만 돈다(평소 테스트에 Robolectric 준비 시간을 더하지 않는다).
+// ./gradlew :fuel-wise:testDebugUnitTest -Pfuelwise.render=true --tests "*ScreenRenderTest"  ->  fuel-wise/build/renders/*.png
+val renderScreens = (findProperty("fuelwise.render") as String?) == "true"
+
 android {
     namespace = "com.hmgcarapp.fuelwise"
     compileSdk = 35
@@ -20,8 +32,17 @@ android {
         applicationId = "com.hmgcarapp.fuelwise"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) create("release") {
+            storeFile = rootProject.file(".signing/" + signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
     }
 
     // release 빌드에는 API 키를 절대 주입하지 않는다(APK 에서 추출 가능하므로). debug 에서만 로컬 키를 주입.
@@ -31,6 +52,7 @@ android {
             buildConfigField("String", "API_KEY", "\"${apiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         }
         release {
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "API_KEY", "\"\"")
         }
     }
@@ -46,8 +68,8 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
-        // 화면 렌더링 테스트(Robolectric)가 앱 리소스(글꼴 등)를 읽을 수 있게 한다
-        unitTests.isIncludeAndroidResources = true
+        // 화면 렌더링 테스트(Robolectric)가 앱 리소스(글꼴 등)를 읽을 수 있게 한다. 렌더링할 때만 켠다(평소 테스트 빌드에서 리소스 병합 생략)
+        unitTests.isIncludeAndroidResources = renderScreens
     }
 }
 
@@ -65,9 +87,6 @@ dependencies {
     testImplementation(libs.androidx.test.core)
 }
 
-// 화면 렌더링 테스트는 -Pfuelwise.render=true 일 때만 돈다(평소 테스트에 Robolectric 준비 시간을 더하지 않는다).
-// ./gradlew :fuel-wise:testDebugUnitTest -Pfuelwise.render=true --tests "*ScreenRenderTest"  ->  fuel-wise/build/renders/*.png
-val renderScreens = (findProperty("fuelwise.render") as String?) == "true"
 tasks.withType<Test>().configureEach {
     systemProperty("fuelwise.render", renderScreens.toString())
     if (renderScreens) systemProperty("roborazzi.test.record", "true") else filter.excludeTestsMatching("*ScreenRenderTest")

@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
@@ -28,7 +30,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -169,13 +174,12 @@ private fun CandidatesPortrait(s: UiState, navi: NaviStatus, a: FuelWiseActions,
         val sheet = maxHeight * 0.64f
         CandidateMap(s, a, MapInsets(left = GUTTER, top = 112.dp, right = GUTTER, bottom = sheet), compactPins = true)
         PageTabs(s, a, onAllOpen, Modifier.align(Alignment.TopCenter).padding(GUTTER).fillMaxWidth())
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(sheet),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            s.banner?.let { BannerCard(s, navi, a, it, Modifier.padding(horizontal = GUTTER)) }
-            PanelHeader(s, a, Modifier.padding(horizontal = GUTTER))
-            OptionList(s, navi, a, allOpen, onAllOpen, Modifier.weight(1f))
+        // 알림 카드·잔량 머리도 목록과 함께 스크롤한다(시트가 좁아 고정하면 고른 카드의 버튼이 가려진다)
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(sheet)) {
+            OptionList(s, navi, a, allOpen, onAllOpen, Modifier.weight(1f)) {
+                s.banner?.let { b -> item(key = "banner") { BannerCard(s, navi, a, b) } }
+                item(key = "header") { PanelHeader(s, a) }
+            }
         }
     }
 }
@@ -236,29 +240,50 @@ private fun PanelHeader(s: UiState, a: FuelWiseActions, modifier: Modifier = Mod
     }
 }
 
-/** 카드 목록 + '모두 보기'. 목록이 길면 목록만 스크롤되고 버튼은 아래에 계속 보인다. */
+/**
+ * 카드 목록 + '모두 보기'. 목록이 길면 목록만 스크롤되고 버튼은 아래에 계속 보인다.
+ * [leading]: 목록 맨 위에 함께 스크롤할 항목(세로 창의 알림·잔량 카드). 좁은 시트에서도 고른 카드의 버튼까지 스크롤로 닿게 한다.
+ */
 @Composable
-private fun OptionList(s: UiState, navi: NaviStatus, a: FuelWiseActions, allOpen: Boolean, onAllOpen: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+private fun OptionList(
+    s: UiState,
+    navi: NaviStatus,
+    a: FuelWiseActions,
+    allOpen: Boolean,
+    onAllOpen: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    leading: LazyListScope.() -> Unit = {},
+) {
     val selectedId = s.selected?.candidate?.id
     val bestId = s.best?.candidate?.id
     val visible = remember(s.quotes, selectedId, allOpen) { visibleOptions(s.quotes, selectedId, allOpen) }
+    val listState = rememberLazyListState()
+    // 목록은 맨 위 항목의 키를 따라가므로, 정렬이 바뀌거나 지도에서 4위 밖 후보를 골라 맨 위가 바뀌면 직접 맨 위로 올린다
+    LaunchedEffect(s.settings.sort, visible.firstOrNull()?.candidate?.id) { listState.scrollToItem(0) }
+    // 고른 카드를 한 번만 끌어온다(목록 밖으로 나갔다 돌아올 때마다 다시 스크롤하지 않게)
+    var revealedId by remember { mutableStateOf<String?>(null) }
     Column(modifier.fillMaxWidth()) {
         LazyColumn(
             Modifier.weight(1f, fill = false).fillMaxWidth().testTag("candidate_list"),
+            state = listState,
             contentPadding = PaddingValues(start = GUTTER, end = GUTTER, top = 4.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            leading()
             if (s.quotes.isEmpty()) item(key = "empty") { EmptyCandidates(s) }
             else if (selectedId == null) item(key = "pick") { Txt(detailEmptyText(false), PleosTheme.typography.labelMedium, secondary = true) }
             items(visible, key = { it.candidate.id }) { q ->
+                val id = q.candidate.id
                 OptionCard(
                     rank = s.quotes.indexOf(q) + 1,
                     q = q,
-                    selected = q.candidate.id == selectedId,
-                    best = q.candidate.id == bestId,
+                    selected = id == selectedId,
+                    best = id == bestId,
                     s = s,
                     navi = navi,
                     a = a,
+                    reveal = id == selectedId && revealedId != id,
+                    onRevealed = { revealedId = id },
                 )
             }
         }
@@ -282,20 +307,31 @@ private fun EmptyCandidates(s: UiState) {
 /** 후보 카드. 고르지 않은 카드는 한눈에 비교할 정보만, 고른 카드는 비용 내역과 버튼까지 펼친다. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun OptionCard(rank: Int, q: Quote, selected: Boolean, best: Boolean, s: UiState, navi: NaviStatus, a: FuelWiseActions) {
+private fun OptionCard(
+    rank: Int,
+    q: Quote,
+    selected: Boolean,
+    best: Boolean,
+    s: UiState,
+    navi: NaviStatus,
+    a: FuelWiseActions,
+    reveal: Boolean,
+    onRevealed: () -> Unit,
+) {
     val colors = PleosTheme.colors
     // 고른 카드가 펼쳐진 뒤 버튼까지 목록 안에 보이도록 필요한 만큼만 스크롤한다
-    val reveal = remember { BringIntoViewRequester() }
-    LaunchedEffect(selected) {
-        if (selected) {
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(reveal) {
+        if (reveal) {
             delay(PleosMotion.DurationMedium1 + 50L)
-            reveal.bringIntoView()
+            requester.bringIntoView()
+            onRevealed()
         }
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .bringIntoViewRequester(reveal)
+            .bringIntoViewRequester(requester)
             .floatingSurface(CARD_RADIUS, outline = if (selected) colors.informativePositive else null)
             .then(if (selected) Modifier else Modifier.clickable(role = Role.Button) { a.select(q.candidate.id) })
             .animateContentSize(tween(PleosMotion.DurationMedium1, easing = PleosMotion.Emphasized))
@@ -335,7 +371,8 @@ private fun SelectedDetail(q: Quote, s: UiState, navi: NaviStatus, a: FuelWiseAc
     Box(Modifier.fillMaxWidth().height(1.dp).background(colors.basicAlphaDark100))
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         KV("주입 ${num1(q.quantity)}$unit × ${num0(q.unitPrice)}원", won(q.fillCost), small = true)
-        q.discountName?.let { KV("할인 ${it.substringBefore(" (")}", "${num0(q.unitPrice)}원/$unit", tag = "d_unit", small = true) }
+        // 할인 효과가 보이게 표시 단가 -> 할인 적용 단가
+        q.discountName?.let { KV("할인 ${it.substringBefore(" (")}", "${num0(q.listUnitPrice)} → ${num0(q.unitPrice)}원/$unit", tag = "d_unit", small = true) }
         KV("우회 ${num1(q.detourKm)}km ${if (fuel) "연료비" else "전력비"}", won(q.detourEnergyCost), small = true)
         KV("실질 비용", won(q.totalCost), tag = "d_total", strong = true)
     }

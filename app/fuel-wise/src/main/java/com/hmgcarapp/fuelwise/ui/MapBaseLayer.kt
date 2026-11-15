@@ -107,8 +107,8 @@ private const val MAX_LABELS = 22
 internal class MapLine(val path: Path, val color: Color, val widthPx: Float, val alpha: Float = 1f)
 internal class MapText(val layout: TextLayoutResult, val topLeft: Offset, val color: Color)
 
-/** 투영이 바뀔 때만 다시 만드는 지도 바탕(면 -> 선 -> 지명 순으로 그린다). */
-internal class MapScene(val areas: List<Pair<Path, Color>>, val lines: List<MapLine>, val labels: List<MapText>)
+/** 투영이 바뀔 때만 다시 만드는 지도 바탕 도형(면 -> 선 순으로 그린다). 지명은 [placeMapLabels] 로 따로 고른다. */
+internal class MapScene(val areas: List<Pair<Path, Color>>, val lines: List<MapLine>)
 
 /** 1e-5도 정수 좌표를 화면 좌표로. [MapProjection.toOffset] 과 같은 식. */
 internal class E5Projector(p: MapProjection) {
@@ -127,20 +127,16 @@ internal class E5Projector(p: MapProjection) {
     fun heightPx(dLatE5: Int): Double = dLatE5 * ky
 }
 
-internal fun buildMapScene(
+internal fun buildMapGeometry(
     base: MapBase,
-    proj: MapProjection,
+    pr: E5Projector,
+    pxPerKm: Float,
     widthPx: Float,
     heightPx: Float,
     density: Float,
     palette: MapPalette,
-    measurer: TextMeasurer,
-    labelStyle: TextStyle,
-    labelArea: Rect,
-    avoid: List<Rect>,
 ): MapScene {
-    val pr = E5Projector(proj)
-    val zoom = proj.pxPerKm / density // dp/km
+    val zoom = pxPerKm / density // dp/km
     val margin = 64f * density
     val minLon = pr.lonAt(-margin)
     val maxLon = pr.lonAt(widthPx + margin)
@@ -193,7 +189,7 @@ internal fun buildMapScene(
             pathOf(layers[layer], false) { !it.tunnel }?.let { add(MapLine(it, palette.road.getValue(layer), dp(spec.meters, spec.minDp, spec.maxDp))) }
         }
     }
-    return MapScene(areas, lines, placeLabels(base.labels, pr, zoom, density, palette, measurer, labelStyle, labelArea, avoid))
+    return MapScene(areas, lines)
 }
 
 /** 배율마다 보일 지명 종류. 멀리 보면 큰 지명만, 가까이 보면 동 이름까지. */
@@ -204,20 +200,25 @@ private fun shows(kind: MapLabel.Kind, zoom: Float): Boolean = when (kind) {
     MapLabel.Kind.QUARTER -> zoom >= 70f
 }
 
-/** 겹치지 않게 지명을 고른다: 종류 우선순위, 같은 종류면 지도 가운데에 가까운 것부터. 같은 이름(강)은 멀리 떨어진 것만 다시 쓴다. */
-private fun placeLabels(
-    labels: List<MapLabel>,
+/**
+ * 겹치지 않게 지명을 고른다: 종류 우선순위, 같은 종류면 지도 가운데에 가까운 것부터. 같은 이름(강)은 멀리 떨어진 것만 다시 쓴다.
+ * [avoid] 사각형(핀·이름표·축척)과 [avoidLines] 꺾은선(경로, 화면 좌표 x0,y0,x1,y1,...)에 걸리는 지명은 쓰지 않는다.
+ */
+internal fun placeMapLabels(
+    base: MapBase,
     pr: E5Projector,
-    zoom: Float,
+    pxPerKm: Float,
     density: Float,
     palette: MapPalette,
     measurer: TextMeasurer,
-    base: TextStyle,
+    baseStyle: TextStyle,
     area: Rect,
     avoid: List<Rect>,
+    avoidLines: List<FloatArray>,
 ): List<MapText> {
+    val zoom = pxPerKm / density
     val center = area.center
-    val candidates = labels.asSequence()
+    val candidates = base.labels.asSequence()
         .filter { shows(it.kind, zoom) }
         .map { Triple(it, pr.x(it.lonE5), pr.y(it.latE5)) }
         .filter { (_, x, y) -> area.contains(Offset(x, y)) }
@@ -230,17 +231,43 @@ private fun placeLabels(
     for ((l, x, y) in candidates) {
         if (out.size >= MAX_LABELS) break
         if (sameName[l.text]?.any { hypot(it.x - x, it.y - y) < 520f * density } == true) continue
-        val style = l.kind.style(base, palette)
+        val style = l.kind.style(baseStyle, palette)
         val layout = measurer.measure(l.text, style.first, maxLines = 1)
         val r = Rect(x - layout.size.width / 2f, y - layout.size.height / 2f, x + layout.size.width / 2f, y + layout.size.height / 2f)
         if (r.left < area.left || r.right > area.right || r.top < area.top || r.bottom > area.bottom) continue
         val padded = r.inflate(pad)
         if (placed.any { it.overlaps(padded) } || avoid.any { it.overlaps(r) }) continue
+        // 경로선이 글자를 가리지 않게(선 두께만큼 여유)
+        val lineBox = r.inflate(8f * density)
+        if (avoidLines.any { polylineHits(it, lineBox) }) continue
         placed += padded
         out += MapText(layout, r.topLeft, style.second)
         sameName.getOrPut(l.text) { ArrayList() } += Offset(x, y)
     }
     return out
+}
+
+/** 꺾은선(x0,y0,x1,y1,...)이 사각형을 지나는지. */
+internal fun polylineHits(line: FloatArray, r: Rect): Boolean {
+    var i = 0
+    while (i + 3 < line.size) {
+        if (segmentHitsRect(line[i], line[i + 1], line[i + 2], line[i + 3], r)) return true
+        i += 2
+    }
+    return line.size == 2 && r.contains(Offset(line[0], line[1]))
+}
+
+/** 선분과 사각형이 만나는지(분리축: x, y, 선분의 법선). */
+internal fun segmentHitsRect(x1: Float, y1: Float, x2: Float, y2: Float, r: Rect): Boolean {
+    if (maxOf(x1, x2) < r.left || minOf(x1, x2) > r.right || maxOf(y1, y2) < r.top || minOf(y1, y2) > r.bottom) return false
+    val dx = x2 - x1
+    val dy = y2 - y1
+    fun side(px: Float, py: Float) = dx * (py - y1) - dy * (px - x1)
+    val a = side(r.left, r.top)
+    val b = side(r.right, r.top)
+    val c = side(r.left, r.bottom)
+    val d = side(r.right, r.bottom)
+    return !((a > 0 && b > 0 && c > 0 && d > 0) || (a < 0 && b < 0 && c < 0 && d < 0))
 }
 
 private fun MapLabel.Kind.priority(): Int = when (this) {
@@ -259,12 +286,15 @@ private fun MapLabel.Kind.style(base: TextStyle, p: MapPalette): Pair<TextStyle,
     MapLabel.Kind.QUARTER -> base.copy(fontSize = 15.sp, lineHeight = 18.sp) to p.label
 }
 
-internal fun DrawScope.drawMapScene(scene: MapScene, palette: MapPalette) {
+internal fun DrawScope.drawMapScene(scene: MapScene) {
     scene.areas.forEach { (path, color) -> drawPath(path, color) }
     scene.lines.forEach { drawPath(it.path, it.color, alpha = it.alpha, style = Stroke(it.widthPx, cap = StrokeCap.Round, join = StrokeJoin.Round)) }
+}
+
+internal fun DrawScope.drawMapLabels(labels: List<MapText>, palette: MapPalette) {
     // 글자 테두리(halo): 도로·녹지 위에서도 읽히게. 채우기는 Fill 을 명시한다(생략하면 앞의 획 스타일이 남는다)
     val halo = Stroke(4f * density, join = StrokeJoin.Round)
-    scene.labels.forEach {
+    labels.forEach {
         drawText(it.layout, color = palette.halo, topLeft = it.topLeft, drawStyle = halo)
         drawText(it.layout, color = it.color, topLeft = it.topLeft, drawStyle = Fill)
     }

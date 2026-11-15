@@ -31,7 +31,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -137,13 +140,22 @@ private fun routePath(o: Offset, station: Offset, dest: Offset?, bend: Float, ma
     }
 }
 
-/** 도로를 따라가는 경로를 화면 경로로. */
-private fun roadPath(r: RoadRoute, pr: E5Projector): Path = Path().apply {
+/** 도로를 따라가는 경로를 화면 좌표 꺾은선(x0,y0,x1,y1,...)으로. */
+private fun polyline(r: RoadRoute, pr: E5Projector): FloatArray {
+    val out = FloatArray(r.pts.size)
     var i = 0
     while (i < r.pts.size) {
-        val x = pr.x(r.pts[i + 1])
-        val y = pr.y(r.pts[i])
-        if (i == 0) moveTo(x, y) else lineTo(x, y)
+        out[i] = pr.x(r.pts[i + 1])
+        out[i + 1] = pr.y(r.pts[i])
+        i += 2
+    }
+    return out
+}
+
+private fun pathOf(line: FloatArray): Path = Path().apply {
+    var i = 0
+    while (i + 1 < line.size) {
+        if (i == 0) moveTo(line[0], line[1]) else lineTo(line[i], line[i + 1])
         i += 2
     }
 }
@@ -187,7 +199,8 @@ internal fun RouteMapCanvas(
     val palette = if (colors.isDark) MapPalette.Dark else MapPalette.Light
     val measurer = rememberTextMeasurer(cacheSize = 64)
     val labelStyle = PleosTheme.typography.labelSmall
-    val selected = quotes.firstOrNull { it.candidate.id == selectedId } ?: quotes.firstOrNull()
+    // 주행 중에는 안내 대상만 그린다: 그 후보가 목록에서 빠졌으면 다른 후보로 바꿔 그리지 않는다(안내 문구와 지도가 어긋나지 않게)
+    val selected = quotes.firstOrNull { it.candidate.id == selectedId } ?: if (focusOnly) null else quotes.firstOrNull()
     val shown = if (focusOnly) listOfNotNull(selected) else (quotes.take(3) + listOfNotNull(selected)).distinctBy { it.candidate.id }
     val minorAll = if (focusOnly) emptyList() else quotes.filter { q -> shown.none { it.candidate.id == q.candidate.id } }.take(MAX_MINOR)
     val selIndex = shown.indexOfFirst { it.candidate.id == selected?.candidate?.id }
@@ -227,8 +240,10 @@ internal fun RouteMapCanvas(
         val focus = listOf(origin) + listOfNotNull(dest) + shown.map { it.candidate.pos } + roads.filterNotNull().flatMap { it.corners() }
         val proj = remember(focus, w, h, left, top, right, bottom) { MapProjection.fit(focus, w, h, left, top, right, bottom) }
         val pr = remember(proj) { E5Projector(proj) }
-        val roadPaths = remember(pr, roads) { roads.map { r -> r?.let { roadPath(it, pr) } } }
-        val directPath = remember(pr, directRoad) { directRoad?.let { roadPath(it, pr) } }
+        val roadLines = remember(pr, roads) { roads.map { r -> r?.let { polyline(it, pr) } } }
+        val roadPaths = remember(roadLines) { roadLines.map { it?.let(::pathOf) } }
+        val directLine = remember(pr, directRoad) { directRoad?.let { polyline(it, pr) } }
+        val directPath = remember(directLine) { directLine?.let(::pathOf) }
         val o = proj.toOffset(origin)
         val d = dest?.let { proj.toOffset(it) }
         val pts = shown.map { proj.toOffset(it.candidate.pos) }
@@ -258,17 +273,32 @@ internal fun RouteMapCanvas(
             minor.forEach { (_, p) -> add(Rect(p, px(10.dp))) }
             add(Rect(w - right - px(500.dp), px(scaleTop), w - right, px(scaleTop + SCALE_RESERVE)))
         }
-        // 지도 바탕은 투영(선택 후보에 따라 바뀜)이 바뀔 때만 다시 만든다. 지명은 패널에 가리지 않는 영역에만 쓴다
+        // 지명이 피할 경로선(도로 경로, 없으면 직선으로 어림)
+        val avoidLines = remember(roadLines, directLine, o, d, pts) {
+            buildList {
+                pts.forEachIndexed { i, p ->
+                    add(roadLines.getOrNull(i) ?: if (d != null) floatArrayOf(o.x, o.y, p.x, p.y, d.x, d.y) else floatArrayOf(o.x, o.y, p.x, p.y))
+                }
+                if (d != null) add(directLine ?: floatArrayOf(o.x, o.y, d.x, d.y))
+            }
+        }
+        // 지도 바탕 도형은 투영(선택 후보에 따라 바뀜)이 바뀔 때만, 지명은 피할 것이 바뀔 때만 다시 만든다. 지명은 패널에 가리지 않는 영역에만 쓴다
         val labelArea = Rect(left + px(8.dp), visibleTop + px(8.dp), w - right - px(8.dp), h - bottom - px(8.dp))
-        val scene = remember(mapBase, proj, w, h, palette, labelArea, obstacles, labelStyle) {
-            mapBase?.let { buildMapScene(it, proj, w, h, density.density, palette, measurer, labelStyle, labelArea, obstacles) }
+        val scene = remember(mapBase, pr, w, h, palette) {
+            mapBase?.let { buildMapGeometry(it, pr, proj.pxPerKm, w, h, density.density, palette) }
+        }
+        val mapLabels = remember(mapBase, pr, labelArea, obstacles, avoidLines, palette, labelStyle) {
+            mapBase?.let { placeMapLabels(it, pr, proj.pxPerKm, density.density, palette, measurer, labelStyle, labelArea, obstacles, avoidLines) }.orEmpty()
+        }
+        // 지도 바탕 그리기 블록을 기억해 두면, 후보 선택·잔량 갱신으로 화면이 다시 구성돼도 바탕 레이어를 다시 그리지 않는다
+        val drawBase: DrawScope.() -> Unit = remember(scene, mapLabels, palette) {
+            { if (scene != null) { drawMapScene(scene); drawMapLabels(mapLabels, palette) } }
         }
 
+        // 1~2. 지도 바탕(녹지·물·건물·도로·지명). 도형이 많아 따로 그려 둔 그림(오프스크린 레이어)을 다시 쓴다
+        if (scene != null) Canvas(Modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen), onDraw = drawBase)
         Canvas(Modifier.fillMaxSize()) {
-            if (scene != null) {
-                // 1~2. 지도 바탕(녹지·물·건물·도로·지명)
-                drawMapScene(scene, palette)
-            } else {
+            if (scene == null) {
                 // 1. 격자(내 위치 기준). 지도를 아직 못 읽었을 때 거리 감을 주는 바탕이다
                 val step = 80.dp.toPx()
                 var gx = o.x % step
@@ -347,7 +377,8 @@ internal fun RouteMapCanvas(
                     rank = quotes.indexOfFirst { it.candidate.id == q.candidate.id } + 1,
                     q = q,
                     selected = i == selIndex,
-                    compact = compactPins && i != selIndex,
+                    // 주행 중에는 순위 번호만(이름·단가는 안내 카드 한 줄에 이미 있다)
+                    compact = focusOnly || (compactPins && i != selIndex),
                     onClick = onSelect?.let { f -> { f(q.candidate.id) } },
                 )
             }
