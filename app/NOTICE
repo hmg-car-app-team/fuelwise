@@ -9,4 +9,5 @@
 5. 외부 데이터 출처 (해당 앱에만 적용)
    - MyClimate: 날씨 데이터 Open-Meteo.com (CC BY 4.0, https://open-meteo.com). 대기질은 Copernicus Atmosphere Monitoring Service(CAMS) 모델 데이터를 Open-Meteo 로 받습니다. 무료 API 는 비상업 이용 범위입니다.
    - FuelWise: 전기차 충전소 스냅샷 - 한국환경공단 『전기자동차 충전소 정보』(공공데이터포털). 공공누리 제1유형(출처표시), 가공·편집됨.
+   - FuelWise: 지도 바탕(도로·하천·녹지·건물·지명)과 경로 예시용 도로망 - © OpenStreetMap contributors, Open Database License(ODbL) 1.0 (https://www.openstreetmap.org/copyright). Overpass API 로 강남·서초·성남 일대를 받아 골라 내고 단순화했습니다(fuelwise/tools/map_base). 앱 지도 화면 오른쪽 아래에도 출처를 표시합니다.
    - WakeMate: 졸음쉼터·휴게소 스냅샷 - 한국도로공사 공공데이터(공공데이터포털). 이용허락범위 '제한 없음'으로 표기되어 있고 공공누리 유형은 포털에 표기되지 않아 확인하지 못했으며, 출처를 표시하고 가공·편집했음을 밝힙니다.

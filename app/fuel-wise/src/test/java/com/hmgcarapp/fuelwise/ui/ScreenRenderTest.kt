@@ -23,6 +23,7 @@ import com.hmgcarapp.fuelwise.domain.RouteDestination
 import com.hmgcarapp.fuelwise.domain.Settings
 import com.hmgcarapp.fuelwise.domain.SortKey
 import com.hmgcarapp.fuelwise.domain.VoiceStatus
+import com.hmgcarapp.fuelwise.map.MapBase
 import com.hmgcarapp.fuelwise.navi.NaviAction
 import com.hmgcarapp.fuelwise.navi.NaviStatus
 import com.hmgcarapp.fuelwise.navi.NaviText
@@ -30,6 +31,7 @@ import com.hmgcarapp.fuelwise.navi.RouteMode
 import com.hmgcarapp.fuelwise.navi.RoutePlans
 import com.hmgcarapp.pleos.designsystem.theme.PleosFormFactor
 import com.hmgcarapp.pleos.designsystem.theme.PleosTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
@@ -56,7 +58,9 @@ class ScreenRenderTest {
     private fun render(name: String, s: UiState, dark: Boolean = false, allOpen: Boolean = false, navi: NaviStatus = NaviStatus.Idle) {
         captureRoboImage(File("build/renders/$name.png")) {
             PleosTheme(darkTheme = dark, formFactor = PleosFormFactor.ConnectS) {
-                FuelWiseScreen(s, navi, debuggable = false, driveReason = "", a = NoActions, initialAllOpen = allOpen)
+                CompositionLocalProvider(LocalMapBase provides RenderFixtures.mapBase) {
+                    FuelWiseScreen(s, navi, debuggable = false, driveReason = "", a = NoActions, initialAllOpen = allOpen)
+                }
             }
         }
     }
@@ -110,6 +114,9 @@ internal object RenderFixtures {
 
     private fun asset(name: String): String =
         listOf("src/main/assets/$name", "fuel-wise/src/main/assets/$name").map(::File).first { it.exists() }.readText()
+
+    /** 앱과 같은 오프라인 지도 바탕. */
+    val mapBase: MapBase by lazy { MapBase.parse(asset(MapBase.ASSET)) }
 
     /** 앱의 FakeStationRepository 와 같은 병합(주유소 샘플 + 충전소 스냅샷). */
     private val merged: StationData.Merged by lazy { StationData.merge(asset("stations_sample.json"), asset("ev_stations.json")) }

@@ -14,16 +14,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,6 +47,7 @@ import com.hmgcarapp.fuelwise.domain.ReplaceRules
 import com.hmgcarapp.fuelwise.domain.ReportLogic
 import com.hmgcarapp.fuelwise.domain.StoreRules
 import com.hmgcarapp.fuelwise.domain.VoiceStatus
+import com.hmgcarapp.fuelwise.map.MapBase
 import com.hmgcarapp.fuelwise.navi.NaviConnectRules
 import com.hmgcarapp.fuelwise.navi.NaviStatus
 import com.hmgcarapp.fuelwise.navi.RoutePlans
@@ -109,8 +113,13 @@ fun FuelWiseApp(c: AppController) {
     LaunchedEffect(snap.state) { c.onDriveState(snap.state) }
     val navi by c.navi.status.collectAsState()
     val actions = remember(c) { ControllerActions(c) }
+    // 지도 바탕은 앱에서 한 번만 읽는다(IO). 읽는 동안에는 지도 캔버스가 격자 바탕으로 그린다
+    val context = LocalContext.current
+    val mapBase by produceState(MapBase.cachedOrNull(), context) { if (value == null) value = MapBase.load(context.applicationContext) }
     // 화면은 core 스냅샷(초기값 DRIVING)을 직접 쓴다: 컨트롤러의 s.drive 반영 지연 때문에 정차 UI 가 첫 프레임에 보이지 않게
-    FuelWiseScreen(raw.copy(drive = snap.state), navi, c.debuggable, snap.reason, actions)
+    CompositionLocalProvider(LocalMapBase provides mapBase) {
+        FuelWiseScreen(raw.copy(drive = snap.state), navi, c.debuggable, snap.reason, actions)
+    }
 }
 
 /**
@@ -188,6 +197,7 @@ private fun DrivingView(s: UiState, navi: NaviStatus) {
             focusOnly = true,
             insets = MapInsets(left = 16.dp, top = if (hasCard) 176.dp else 16.dp, right = 16.dp, bottom = 16.dp),
             onSelect = null,
+            scaleTop = 16.dp,
         )
         // 보여 줄 내용이 없으면 빈 카드를 그리지 않는다
         if (hasCard) {

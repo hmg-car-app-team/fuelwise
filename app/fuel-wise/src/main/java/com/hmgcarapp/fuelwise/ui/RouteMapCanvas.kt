@@ -36,13 +36,17 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hmgcarapp.fuelwise.domain.EnergyKind
 import com.hmgcarapp.fuelwise.domain.LatLon
 import com.hmgcarapp.fuelwise.domain.Quote
+import com.hmgcarapp.fuelwise.map.MapBase
+import com.hmgcarapp.fuelwise.map.RoadRoute
 import com.hmgcarapp.pleos.designsystem.theme.PleosTheme
 import com.hmgcarapp.pleos.designsystem.theme.strong
 import kotlin.math.cos
@@ -133,6 +137,17 @@ private fun routePath(o: Offset, station: Offset, dest: Offset?, bend: Float, ma
     }
 }
 
+/** 도로를 따라가는 경로를 화면 경로로. */
+private fun roadPath(r: RoadRoute, pr: E5Projector): Path = Path().apply {
+    var i = 0
+    while (i < r.pts.size) {
+        val x = pr.x(r.pts[i + 1])
+        val y = pr.y(r.pts[i])
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+        i += 2
+    }
+}
+
 private val BENDS = floatArrayOf(0.12f, -0.16f, 0.22f, -0.26f)
 private val RING_KM = doubleArrayOf(1.0, 3.0, 5.0, 10.0, 20.0)
 /** 안전 영역 위쪽에 축척 표시를 둘 자리. */
@@ -141,11 +156,14 @@ private val SCALE_RESERVE = 64.dp
 private const val MAX_MINOR = 12
 
 /**
- * 경로 비교 지도. 실제 지도 타일 없이 내 위치·목적지·후보의 상대 위치와 경유 경로를 그린다.
- * 경로선은 직선거리 기반 근사이며 화면에도 그렇게 표기한다.
+ * 경로 비교 지도. 내 위치·목적지·후보의 위치와 경유 경로를 그린다.
+ * 바탕은 앱에 넣은 오프라인 지도([LocalMapBase], OpenStreetMap 가공)이고, 아직 못 읽었으면 격자와 거리 링으로 대신한다.
+ * 경로선은 그 지도의 도로망에서 찾은 예시(도로 등급별 평균 속도 기준, 일방통행·교통 미반영)이고,
+ * 지도가 없거나 길을 못 찾으면 직선거리 기반 곡선으로 근사한다. 어느 쪽인지 화면에 표기한다.
  * - [focusOnly]: 주행 중. 선택(또는 알림) 후보의 경로 하나만 그리고 터치를 받지 않는다.
  * - [compactPins]: 좁은 창. 고르지 않은 후보는 이름 없이 순위 번호만 보여 준다.
  * - [onSelect]: null 이면 핀과 점을 눌러도 아무 일도 없다.
+ * - [scaleTop]: 축척 표시를 둘 높이. 주행 화면처럼 왼쪽 위만 카드가 가리면 지도 맨 위에 둔다.
  */
 @Composable
 internal fun RouteMapCanvas(
@@ -160,21 +178,38 @@ internal fun RouteMapCanvas(
     onSelect: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
     compactPins: Boolean = false,
+    scaleTop: Dp = insets.top,
 ) {
     val colors = PleosTheme.colors
     val density = LocalDensity.current
+    // 내 위치가 지도 데이터 범위 밖이면 지도 없이(격자 바탕) 그린다
+    val mapBase = LocalMapBase.current?.takeIf { it.covers(origin) }
+    val palette = if (colors.isDark) MapPalette.Dark else MapPalette.Light
+    val measurer = rememberTextMeasurer(cacheSize = 64)
+    val labelStyle = PleosTheme.typography.labelSmall
     val selected = quotes.firstOrNull { it.candidate.id == selectedId } ?: quotes.firstOrNull()
     val shown = if (focusOnly) listOfNotNull(selected) else (quotes.take(3) + listOfNotNull(selected)).distinctBy { it.candidate.id }
     val minorAll = if (focusOnly) emptyList() else quotes.filter { q -> shown.none { it.candidate.id == q.candidate.id } }.take(MAX_MINOR)
     val selIndex = shown.indexOfFirst { it.candidate.id == selected?.candidate?.id }
+    // 도로를 따라가는 경로(지도 바탕이 있을 때). 후보·목적지가 바뀔 때만 다시 찾는다
+    val router = mapBase?.router
+    val shownIds = shown.map { it.candidate.id }
+    val roads: List<RoadRoute?> = remember(router, origin, dest, shownIds) { shown.map { q -> router?.via(origin, q.candidate.pos, dest) } }
+    val directRoad: RoadRoute? = remember(router, origin, dest) { if (dest != null) router?.route(origin, dest) else null }
+    val onRoads = roads.isNotEmpty() && roads.all { it != null }
 
-    val land = if (colors.isDark) colors.backgroundSecondary else colors.surfaceHigh
+    val land = when {
+        mapBase != null -> palette.land
+        colors.isDark -> colors.backgroundSecondary
+        else -> colors.surfaceHigh
+    }
     val routeColor = colors.informativePositive
     val destColor = colors.informativeNegative
-    val altColor = colors.textDarkQuaternary
+    // 지도 위에서는 회색 도로와 구분되게 다른 선택지도 옅은 파랑(바탕선 위)으로 그린다
+    val altColor = if (mapBase != null) routeColor.copy(alpha = 0.42f) else colors.textDarkQuaternary
     val gridColor = colors.basicAlphaDark50
     val ringColor = colors.basicAlphaDark100
-    val directColor = colors.textDarkTertiary
+    val directColor = if (mapBase != null) colors.textDarkSecondary else colors.textDarkTertiary
     val dotColor = colors.buttonFilledEnabled
     val minorColor = colors.textDarkTertiary
     val surface = colors.surfaceBasic
@@ -184,12 +219,16 @@ internal fun RouteMapCanvas(
         val w = constraints.maxWidth.toFloat()
         val h = constraints.maxHeight.toFloat()
         val left = px(insets.left)
-        val top = px(insets.top + SCALE_RESERVE)
+        val top = px(maxOf(insets.top, scaleTop + SCALE_RESERVE))
         val right = px(insets.right)
         val bottom = px(insets.bottom)
         val visibleTop = px(insets.top)
-        val focus = listOf(origin) + listOfNotNull(dest) + shown.map { it.candidate.pos }
+        // 도로 경로가 후보 밖으로 돌아 나가도 화면에 들어오게 경로 범위까지 맞춘다
+        val focus = listOf(origin) + listOfNotNull(dest) + shown.map { it.candidate.pos } + roads.filterNotNull().flatMap { it.corners() }
         val proj = remember(focus, w, h, left, top, right, bottom) { MapProjection.fit(focus, w, h, left, top, right, bottom) }
+        val pr = remember(proj) { E5Projector(proj) }
+        val roadPaths = remember(pr, roads) { roads.map { r -> r?.let { roadPath(it, pr) } } }
+        val directPath = remember(pr, directRoad) { directRoad?.let { roadPath(it, pr) } }
         val o = proj.toOffset(origin)
         val d = dest?.let { proj.toOffset(it) }
         val pts = shown.map { proj.toOffset(it.candidate.pos) }
@@ -203,30 +242,66 @@ internal fun RouteMapCanvas(
         // 목적지로 들어오는 경로가 위에서 오면 목적지 이름표는 아래에 붙인다
         val destLabelAbove = d == null || selIndex < 0 || pts[selIndex].y >= d.y
 
+        val labelGap = px(22.dp)
+        val chipH = px(40.dp)
+        // 후보 이름표와 지명이 피할 것: 내 위치·목적지와 그 이름표, 모든 후보 점, 오른쪽 위 축척 표시
+        val obstacles = buildList {
+            add(Rect(o, px(18.dp)))
+            val oy = if (originLabelAbove) o.y - labelGap - chipH else o.y + labelGap
+            add(Rect(o.x - px(64.dp), oy, o.x + px(64.dp), oy + chipH))
+            if (d != null) {
+                add(Rect(d, px(18.dp)))
+                val dy = if (destLabelAbove) d.y - labelGap - chipH else d.y + labelGap
+                add(Rect(d.x - px(90.dp), dy, d.x + px(90.dp), dy + chipH))
+            }
+            pts.forEach { add(Rect(it, px(12.dp))) }
+            minor.forEach { (_, p) -> add(Rect(p, px(10.dp))) }
+            add(Rect(w - right - px(500.dp), px(scaleTop), w - right, px(scaleTop + SCALE_RESERVE)))
+        }
+        // 지도 바탕은 투영(선택 후보에 따라 바뀜)이 바뀔 때만 다시 만든다. 지명은 패널에 가리지 않는 영역에만 쓴다
+        val labelArea = Rect(left + px(8.dp), visibleTop + px(8.dp), w - right - px(8.dp), h - bottom - px(8.dp))
+        val scene = remember(mapBase, proj, w, h, palette, labelArea, obstacles, labelStyle) {
+            mapBase?.let { buildMapScene(it, proj, w, h, density.density, palette, measurer, labelStyle, labelArea, obstacles) }
+        }
+
         Canvas(Modifier.fillMaxSize()) {
-            // 1. 격자(내 위치 기준). 실제 도로가 아니라 거리 감을 주는 바탕이다
-            val step = 80.dp.toPx()
-            var gx = o.x % step
-            if (gx < 0f) gx += step
-            while (gx < size.width) { drawLine(gridColor, Offset(gx, 0f), Offset(gx, size.height), 1.dp.toPx()); gx += step }
-            var gy = o.y % step
-            if (gy < 0f) gy += step
-            while (gy < size.height) { drawLine(gridColor, Offset(0f, gy), Offset(size.width, gy), 1.dp.toPx()); gy += step }
-            // 2. 내 위치 기준 거리 링
-            val ringDash = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 8.dp.toPx()))
-            RING_KM.forEach { km ->
-                val r = (km * proj.pxPerKm).toFloat()
-                if (r > 48.dp.toPx() && r < size.maxDimension) drawCircle(ringColor, r, o, style = Stroke(1.5.dp.toPx(), pathEffect = ringDash))
+            if (scene != null) {
+                // 1~2. 지도 바탕(녹지·물·건물·도로·지명)
+                drawMapScene(scene, palette)
+            } else {
+                // 1. 격자(내 위치 기준). 지도를 아직 못 읽었을 때 거리 감을 주는 바탕이다
+                val step = 80.dp.toPx()
+                var gx = o.x % step
+                if (gx < 0f) gx += step
+                while (gx < size.width) { drawLine(gridColor, Offset(gx, 0f), Offset(gx, size.height), 1.dp.toPx()); gx += step }
+                var gy = o.y % step
+                if (gy < 0f) gy += step
+                while (gy < size.height) { drawLine(gridColor, Offset(0f, gy), Offset(size.width, gy), 1.dp.toPx()); gy += step }
+                // 2. 내 위치 기준 거리 링
+                val ringDash = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 8.dp.toPx()))
+                RING_KM.forEach { km ->
+                    val r = (km * proj.pxPerKm).toFloat()
+                    if (r > 48.dp.toPx() && r < size.maxDimension) drawCircle(ringColor, r, o, style = Stroke(1.5.dp.toPx(), pathEffect = ringDash))
+                }
             }
             // 3. 목적지까지 그냥 갈 때(점선)
             if (d != null) {
-                drawLine(directColor, o, d, 3.dp.toPx(), StrokeCap.Round, PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 10.dp.toPx())))
+                val dash = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 10.dp.toPx()))
+                if (directPath != null) drawPath(directPath, directColor, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = dash))
+                else drawLine(directColor, o, d, 3.dp.toPx(), StrokeCap.Round, dash)
             }
             // 4. 다른 선택지 경로(흐리게) -> 5. 선택한 경로(바탕선 + 강조선)
             val routeStroke = Stroke(6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-            pts.forEachIndexed { i, p -> if (i != selIndex) drawPath(routePath(o, p, d, BENDS[i % BENDS.size], bendMax), altColor, style = routeStroke) }
+            val altCasing = Stroke(11.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            fun pathFor(i: Int): Path = roadPaths.getOrNull(i) ?: routePath(o, pts[i], d, BENDS[i % BENDS.size], bendMax)
+            pts.indices.forEach { i ->
+                if (i == selIndex) return@forEach
+                val path = pathFor(i)
+                if (scene != null) drawPath(path, surface, style = altCasing)
+                drawPath(path, altColor, style = routeStroke)
+            }
             if (selIndex >= 0) {
-                val path = routePath(o, pts[selIndex], d, BENDS[selIndex % BENDS.size], bendMax)
+                val path = pathFor(selIndex)
                 drawPath(path, surface, style = Stroke(16.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 drawPath(path, routeColor, style = Stroke(9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
@@ -254,25 +329,9 @@ internal fun RouteMapCanvas(
             }
         }
 
-        val labelGap = px(22.dp)
-        val chipH = px(40.dp)
         AnchoredLabel(o, above = originLabelAbove, gapPx = labelGap) { MarkerChip(originLabel, routeColor) }
         if (d != null) AnchoredLabel(d, above = destLabelAbove, gapPx = labelGap) { MarkerChip(destLabel ?: "목적지", destColor) }
 
-        // 후보 이름표가 피할 것: 내 위치·목적지와 그 이름표, 모든 후보 점, 오른쪽 위 축척 표시
-        val obstacles = buildList {
-            add(Rect(o, px(18.dp)))
-            val oy = if (originLabelAbove) o.y - labelGap - chipH else o.y + labelGap
-            add(Rect(o.x - px(64.dp), oy, o.x + px(64.dp), oy + chipH))
-            if (d != null) {
-                add(Rect(d, px(18.dp)))
-                val dy = if (destLabelAbove) d.y - labelGap - chipH else d.y + labelGap
-                add(Rect(d.x - px(90.dp), dy, d.x + px(90.dp), dy + chipH))
-            }
-            pts.forEach { add(Rect(it, px(12.dp))) }
-            minor.forEach { (_, p) -> add(Rect(p, px(10.dp))) }
-            add(Rect(w - right - px(500.dp), visibleTop, w - right, visibleTop + px(SCALE_RESERVE)))
-        }
         // 선택한 후보를 먼저(좋은 자리 우선) 놓고 맨 위에 그린다
         val order = shown.indices.sortedBy { if (it == selIndex) 0 else 1 }
         PinLayer(
@@ -300,7 +359,7 @@ internal fun RouteMapCanvas(
         Row(
             Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = insets.top + 8.dp, end = insets.right + 8.dp)
+                .padding(top = scaleTop + 8.dp, end = insets.right + 8.dp)
                 .floatingSurface(14.dp)
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -308,7 +367,23 @@ internal fun RouteMapCanvas(
         ) {
             ScaleBar(barWidth, colors.textDarkPrimary)
             Text(scaleLabel(km), style = PleosTheme.typography.labelSmall.strong(), color = colors.textDarkPrimary)
-            Text("경로선은 직선거리 기준 근사", style = PleosTheme.typography.labelSmall, color = colors.textDarkSecondary)
+            // 경로가 없으면(후보 0곳) 경로선 설명도 필요 없다
+            val routeNote = when {
+                shown.isEmpty() -> null
+                onRoads -> "경로선은 예시 · 실제 길은 내비 안내"
+                else -> "경로선은 직선거리 기준 근사"
+            }
+            routeNote?.let { Text(it, style = PleosTheme.typography.labelSmall, color = colors.textDarkSecondary) }
+        }
+
+        // 지도 데이터 출처(ODbL 표시 의무). 오른쪽 아래, 패널에 가리지 않는 자리
+        if (mapBase != null) {
+            Text(
+                MapBase.ATTRIBUTION,
+                style = PleosTheme.typography.labelSmall.copy(fontSize = 13.sp, lineHeight = 16.sp),
+                color = colors.textDarkTertiary,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = insets.right + 12.dp, bottom = insets.bottom + 8.dp),
+            )
         }
     }
 }
