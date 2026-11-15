@@ -44,7 +44,11 @@ android {
         compose = true
         buildConfig = true
     }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        // 화면 렌더링 테스트(Robolectric)가 앱 리소스(글꼴 등)를 읽을 수 있게 한다
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -54,4 +58,17 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.org.json)
+    // 화면 렌더링(PNG): 에뮬레이터 없이 JVM 에서 Compose 화면을 그린다
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.androidx.test.core)
+}
+
+// 화면 렌더링 테스트는 -Pfuelwise.render=true 일 때만 돈다(평소 테스트에 Robolectric 준비 시간을 더하지 않는다).
+// ./gradlew :fuel-wise:testDebugUnitTest -Pfuelwise.render=true --tests "*ScreenRenderTest"  ->  fuel-wise/build/renders/*.png
+val renderScreens = (findProperty("fuelwise.render") as String?) == "true"
+tasks.withType<Test>().configureEach {
+    systemProperty("fuelwise.render", renderScreens.toString())
+    if (renderScreens) systemProperty("roborazzi.test.record", "true") else filter.excludeTestsMatching("*ScreenRenderTest")
 }
