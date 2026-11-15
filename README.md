@@ -14,6 +14,7 @@
    ```
    adb install -r apk/hmg-car-app-team_FuelWise_release.apk
    ```
+   0.2.0 은 서명 인증서가 이전 0.1.0 과 다릅니다. 0.1.0 이 깔려 있으면 설치가 거부되므로(INSTALL_FAILED_UPDATE_INCOMPATIBLE) 먼저 `adb uninstall com.hmgcarapp.fuelwise` 로 지운 뒤 설치합니다.
 2. 앱 아이콘으로 실행하고, 첫 실행의 권한은 정차 상태에서 허용합니다.
 
 ## 테스트 환경

@@ -19,8 +19,9 @@
 - [x] JVM 렌더링 13장: `docs/renders/*.png` (가로 라이트·다크, 경로+알림, 지도에서 고른 후보, 전체 목록, EV 스냅샷, 세로, 주행, 리포트, 설정, 빈 상태, 세로 주행, 세로+알림)
 - [x] 코드 리뷰 반영 (20:50): 아래 "리뷰에서 고친 것"
 - [ ] Pleos 에뮬레이터(`pleos21`)에서 실제 화면·터치·주행 전환 확인
-- [ ] GitHub 푸시: `keepYaoung` 계정 Write 권한 필요(현재 403)
-- [ ] release 서명 키 확보 후 APK 교체 판단(22:30)
+- [x] GitHub 푸시: Write 권한 받은 뒤 `origin/feat/route-map-floating-cards` 에 푸시 (main 은 그대로)
+- [x] release APK 0.2.0 (versionCode 2): 브랜치의 `apk/` 에 교체. 서명은 `app/.signing`(커밋 제외)의 팀 키 = SafeRadar 0.2.0 과 같은 인증서(SHA-256 77aed3ac…). main 의 0.1.0 APK(8fba61cd…)와 인증서가 달라 덮어쓰기 설치는 안 되고 지운 뒤 설치해야 함
+- [ ] main 반영 판단(22:30)
 
 ### 계획과 달라진 점
 
